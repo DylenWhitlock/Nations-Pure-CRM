@@ -495,7 +495,7 @@ $('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
 /* ================= DATA MAPPING ================= */
 function mapLead(r){
   return {
-    id:r.id, name:r.name, phone:r.phone, address:r.address, county:r.county, csr:r.csr, need:r.need, stage:r.stage,
+    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, need:r.need, stage:r.stage,
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
@@ -571,7 +571,7 @@ function isOffHoursUnconfirmed(l){ return !!l.offHours && !l.repConfirmed && l.s
 function matchesSearch(l){
   if(!state.search) return true;
   const q = state.search.toLowerCase();
-  return (l.name||'').toLowerCase().includes(q) || (l.phone||'').toLowerCase().includes(q);
+  return (l.name||'').toLowerCase().includes(q) || (l.phone||'').toLowerCase().includes(q) || (l.email||'').toLowerCase().includes(q);
 }
 function render(){ renderStats(); renderBoard(); }
 
@@ -670,6 +670,7 @@ function openModal(){
 
   const nameF = el('input',{type:'text', id:'f-name', placeholder:'Customer name'}); nameF.value = lead?.name||'';
   const phoneF = el('input',{type:'tel', id:'f-phone', placeholder:'(214) 555-0100'}); phoneF.value = lead?.phone||'';
+  const emailF = el('input',{type:'email', id:'f-email', placeholder:'name@email.com'}); emailF.value = lead?.email||'';
   const csrF = el('input',{type:'text', id:'f-csr', placeholder:'Who took this call?'}); csrF.value = lead?.csr||'';
   const addrF = el('input',{type:'text', id:'f-addr', placeholder:'Street, city'}); addrF.value = lead?.address||'';
   const countyF = el('input',{type:'text', id:'f-county', placeholder:'e.g. Tarrant'}); countyF.value = lead?.county||'';
@@ -691,12 +692,13 @@ function openModal(){
     el('div',{class:'field'}, el('label',{}, 'Name'), nameF),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Phone'), phoneF),
-      el('div',{class:'field'}, el('label',{}, 'CSR'), csrF)
+      el('div',{class:'field'}, el('label',{}, 'Email'), emailF)
     ),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Address'), addrF),
       el('div',{class:'field'}, el('label',{}, 'County'), countyF)
     ),
+    el('div',{class:'field'}, el('label',{}, 'CSR'), csrF),
     el('div',{class:'field'}, el('label',{}, 'What they need'), needF),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Requested window'), windowF),
@@ -754,7 +756,7 @@ function openModal(){
 
 async function saveLead(existing){
   const data = {
-    name: $('#f-name').value.trim(), phone: $('#f-phone').value.trim(), address: $('#f-addr').value.trim(),
+    name: $('#f-name').value.trim(), phone: $('#f-phone').value.trim(), email: $('#f-email').value.trim(), address: $('#f-addr').value.trim(),
     county: $('#f-county').value.trim(), csr: $('#f-csr').value.trim(),
     need: $('#f-need').value.trim(), requested_window: $('#f-window').value.trim(),
     stage: $('#f-stage').value,
