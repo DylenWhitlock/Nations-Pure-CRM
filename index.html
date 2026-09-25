@@ -1,0 +1,1306 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Nation's Pure Leads</title>
+<link rel="icon" href="assets/nations-pure-logo.png">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700;800&display=swap">
+<style>
+:root{
+  --accent:#1C97A3; --accent-strong:#127581; --accent-soft:#E7F6F5;
+  --bg:#FAFCFC; --surface:#FFFFFF; --surface-2:#F1F6F6;
+  --text:#213538; --text-muted:#6C8285; --border:#E4ECEC;
+  --success:#2E8B57; --success-soft:#E9F7EF;
+  --danger:#C0544A; --danger-soft:#FBEAE8;
+  --warning:#C08F2A; --warning-soft:#FDF3DF;
+  --radius-s:8px; --radius-m:14px;
+  --shadow:0 1px 2px rgba(20,40,40,.05),0 4px 14px rgba(20,40,40,.04);
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){
+  :root:not([data-theme="light"]){
+    --accent:#6BD4D8; --accent-strong:#96E2E4; --accent-soft:#20393B;
+    --bg:#212B2E; --surface:#2A3538; --surface-2:#324043;
+    --text:#F1F6F6; --text-muted:#A9BBBD; --border:#425255;
+    --success:#7BCB9E; --success-soft:#243C34;
+    --danger:#EBA294; --danger-soft:#402C28;
+    --warning:#EAC077; --warning-soft:#3F331C;
+    --shadow:0 1px 2px rgba(0,0,0,.25),0 4px 14px rgba(0,0,0,.2);
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box;}
+body{
+  margin:0; background:var(--bg); color:var(--text);
+  font-family:'Figtree',-apple-system,'Segoe UI',sans-serif;
+  padding-inline:16px; padding-block:16px;
+}
+h1,h2,h3{text-wrap:balance; margin:0;}
+button{font-family:inherit;}
+.wrap{max-width:1400px; margin:0 auto;}
+
+/* header */
+.topbar{display:flex; flex-wrap:wrap; gap:14px; align-items:flex-start; justify-content:space-between; margin-bottom:12px;}
+.brand{display:flex; flex-direction:column; gap:2px;}
+.brand .name{font-size:22px; font-weight:800; letter-spacing:-.01em;}
+.brand .tag{font-size:13px; color:var(--text-muted);}
+.top-controls{display:flex; flex-wrap:wrap; gap:8px; align-items:center;}
+.search{
+  display:flex; align-items:center; gap:6px; background:var(--surface);
+  border:1px solid var(--border); border-radius:999px; padding:8px 14px;
+  min-width:180px;
+}
+.search input{border:none; outline:none; background:transparent; color:var(--text); font-size:13px; width:150px; font-family:inherit;}
+.search svg{flex:none; color:var(--text-muted);}
+.btn{
+  border:1px solid var(--border); background:var(--surface); color:var(--text);
+  border-radius:999px; padding:9px 16px; font-size:13px; font-weight:600;
+  cursor:pointer; display:inline-flex; align-items:center; gap:6px; white-space:nowrap;
+}
+.btn:hover{border-color:var(--accent);}
+.btn-primary{background:var(--accent); border-color:var(--accent); color:#fff;}
+.btn-primary:hover{background:var(--accent-strong); border-color:var(--accent-strong);}
+.btn-ghost{background:transparent;}
+.btn[disabled]{opacity:.55; cursor:default;}
+.chip{
+  border:1px solid var(--border); background:var(--surface); border-radius:999px;
+  padding:6px 12px; font-size:12.5px; font-weight:600; color:var(--text-muted); cursor:pointer;
+}
+.chip.active{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong);}
+.chip.warn{background:var(--warning-soft); border-color:var(--warning); color:var(--warning);}
+
+.tabs{display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border);}
+.tab{border:none; background:none; padding:9px 4px; margin-right:14px; font-size:13.5px; font-weight:700; color:var(--text-muted); cursor:pointer; border-bottom:2px solid transparent; margin-bottom:-1px;}
+.tab.active{color:var(--accent-strong); border-color:var(--accent);}
+
+.stats-row{display:flex; flex-wrap:wrap; gap:8px; margin-bottom:18px;}
+
+/* board */
+.board-scroll{overflow-x:auto; padding-bottom:6px; margin-inline:-16px; padding-inline:16px;}
+.board{display:grid; grid-auto-flow:column; grid-auto-columns:260px; gap:12px; align-items:start;}
+.col{background:var(--surface-2); border-radius:var(--radius-m); padding:10px; display:flex; flex-direction:column; gap:8px; min-height:120px;}
+.col-head{display:flex; align-items:center; justify-content:space-between; padding:4px 6px 2px;}
+.col-title{font-size:12.5px; font-weight:700; text-transform:uppercase; letter-spacing:.04em; color:var(--text-muted); display:flex; align-items:center; gap:6px;}
+.dot{width:7px; height:7px; border-radius:50%; background:var(--accent); flex:none;}
+.dot.success{background:var(--success);}
+.dot.danger{background:var(--danger);}
+.col-count{font-size:12px; font-weight:700; color:var(--text-muted); font-variant-numeric:tabular-nums;}
+.col-body{display:flex; flex-direction:column; gap:8px; min-height:40px;}
+.col-empty{font-size:12px; color:var(--text-muted); padding:14px 8px; text-align:center; opacity:.7;}
+
+.card{
+  background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-s);
+  padding:10px 11px; box-shadow:var(--shadow); cursor:pointer; display:flex; flex-direction:column; gap:6px;
+}
+.card:hover{border-color:var(--accent);}
+.card-name{font-size:13.5px; font-weight:700;}
+.card-need{font-size:12px; color:var(--text-muted); overflow:hidden; text-overflow:ellipsis; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;}
+.card-meta{display:flex; flex-wrap:wrap; gap:5px; align-items:center;}
+.badge{font-size:11px; font-weight:700; padding:3px 8px; border-radius:999px; white-space:nowrap;}
+.badge-rep{background:var(--accent-soft); color:var(--accent-strong);}
+.badge-warn{background:var(--warning-soft); color:var(--warning);}
+.badge-time{background:var(--surface-2); color:var(--text-muted);}
+.badge-appt{background:var(--success-soft); color:var(--success);}
+.card select{
+  margin-top:2px; width:100%; font-size:12px; font-family:inherit; font-weight:600;
+  border:1px solid var(--border); border-radius:7px; padding:6px 7px; background:var(--surface); color:var(--text);
+}
+.card select:focus{outline:2px solid var(--accent); outline-offset:1px;}
+
+/* modal */
+.overlay{position:fixed; inset:0; background:rgba(10,20,20,.45); display:flex; align-items:flex-end; justify-content:center; z-index:50; padding:0;}
+@media (min-width:640px){ .overlay{align-items:center; padding:20px;} }
+.modal{
+  background:var(--surface); width:100%; max-width:480px; max-height:92vh; overflow-y:auto;
+  border-radius:16px 16px 0 0; padding:20px; display:flex; flex-direction:column; gap:14px;
+  box-shadow:var(--shadow);
+}
+@media (min-width:640px){ .modal{border-radius:16px;} }
+.modal-head{display:flex; align-items:center; justify-content:space-between;}
+.modal-head h2{font-size:17px; font-weight:800;}
+.icon-btn{border:none; background:transparent; color:var(--text-muted); cursor:pointer; padding:4px; border-radius:8px; display:flex;}
+.icon-btn:hover{background:var(--surface-2); color:var(--text);}
+.field{display:flex; flex-direction:column; gap:5px;}
+.field label{font-size:12px; font-weight:700; color:var(--text-muted);}
+.field input[type=text], .field input[type=tel], .field input[type=email], .field input[type=password], .field input[type=date], .field textarea, .field select{
+  border:1px solid var(--border); border-radius:9px; padding:10px 11px; font-size:14px;
+  font-family:inherit; background:var(--bg); color:var(--text); width:100%;
+}
+.field textarea{resize:vertical; min-height:60px;}
+.row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+.toggle-row{display:flex; align-items:center; justify-content:space-between; gap:10px; background:var(--surface-2); border-radius:10px; padding:10px 12px;}
+.toggle-row .lbl{font-size:13px; font-weight:600;}
+.toggle-row .sub{font-size:11.5px; color:var(--text-muted); margin-top:1px;}
+.switch{position:relative; width:38px; height:22px; flex:none;}
+.switch input{opacity:0; width:100%; height:100%; margin:0; position:absolute; cursor:pointer;}
+.switch .track{position:absolute; inset:0; background:var(--border); border-radius:999px; transition:.15s;}
+.switch .thumb{position:absolute; top:2px; left:2px; width:18px; height:18px; border-radius:50%; background:#fff; transition:.15s; box-shadow:0 1px 3px rgba(0,0,0,.3);}
+.switch input:checked + .track{background:var(--accent);}
+.switch input:checked + .track .thumb{transform:translateX(16px);}
+.warn-note{font-size:12px; color:var(--warning); background:var(--warning-soft); border-radius:9px; padding:8px 10px; display:flex; gap:6px; align-items:flex-start;}
+.modal-actions{display:flex; gap:8px; justify-content:space-between; align-items:center; margin-top:4px;}
+.attrib{font-size:11.5px; color:var(--text-muted);}
+.confirm-del{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted);}
+.confirm-del button{font-size:12px; padding:6px 10px;}
+.link-btn{background:none; border:none; color:var(--danger); font-size:12.5px; font-weight:600; cursor:pointer; padding:4px 0;}
+.lead-docs{border:1px solid var(--border); border-radius:10px; padding:10px 12px; display:flex; flex-direction:column; gap:8px;}
+.lead-docs .lbl{font-size:12px; font-weight:700; color:var(--text-muted);}
+.doc-row{display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12.5px;}
+.doc-row a{color:var(--accent-strong); font-weight:600; text-decoration:none;}
+.doc-row a:hover{text-decoration:underline;}
+
+.toast{position:fixed; bottom:18px; left:50%; transform:translateX(-50%); background:var(--text); color:var(--bg); font-size:13px; font-weight:600; padding:10px 16px; border-radius:999px; box-shadow:var(--shadow); z-index:80; opacity:0; pointer-events:none; transition:opacity .2s;}
+.toast.show{opacity:1;}
+[hidden]{display:none !important;}
+
+/* documents view */
+.panel{background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-m); padding:16px; margin-bottom:16px;}
+.panel-head{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:12px;}
+.panel-head h2{font-size:15px; font-weight:800;}
+.panel-sub{font-size:12px; color:var(--text-muted); margin-top:2px;}
+.brochure-grid{display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:10px;}
+.brochure-card{border:1px solid var(--border); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:6px; background:var(--bg);}
+.brochure-name{font-size:13px; font-weight:700;}
+.brochure-cat{font-size:11px; color:var(--accent-strong); background:var(--accent-soft); border-radius:999px; padding:2px 8px; align-self:flex-start;}
+.brochure-actions{display:flex; gap:10px; margin-top:4px; font-size:12px;}
+.brochure-actions a, .brochure-actions button{color:var(--accent-strong); text-decoration:none; background:none; border:none; padding:0; cursor:pointer; font-weight:600; font-family:inherit; font-size:12px;}
+.brochure-actions .del{color:var(--danger);}
+.upload-row{display:flex; flex-wrap:wrap; gap:8px; align-items:flex-end; margin-bottom:14px; padding-bottom:14px; border-bottom:1px solid var(--border);}
+.upload-row .field{flex:1; min-width:140px;}
+.filepick{border:1px dashed var(--border); border-radius:9px; padding:9px 11px; font-size:12.5px; background:var(--bg); color:var(--text-muted); cursor:pointer; display:flex; align-items:center; gap:6px;}
+.filepick input{display:none;}
+.wo-list-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 0; border-bottom:1px solid var(--border); font-size:13px;}
+.wo-list-row:last-child{border-bottom:none;}
+.wo-list-main{display:flex; flex-direction:column; gap:2px;}
+.wo-list-sub{font-size:11.5px; color:var(--text-muted);}
+.empty-note{font-size:12.5px; color:var(--text-muted); padding:10px 2px;}
+
+/* work order builder */
+.wo-overlay{position:fixed; inset:0; background:var(--bg); z-index:60; overflow-y:auto;}
+.wo-shell{max-width:900px; margin:0 auto; padding:16px 16px 100px;}
+.wo-topbar{display:flex; align-items:center; justify-content:space-between; gap:10px; margin-bottom:16px; position:sticky; top:env(safe-area-inset-top,0px); background:var(--bg); padding-block:6px; z-index:5;}
+.wo-topbar h2{font-size:16px; font-weight:800;}
+fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding:14px; margin:0 0 14px; background:var(--surface);}
+.wo-fieldset legend{font-size:12.5px; font-weight:800; color:var(--accent-strong); padding:0 6px;}
+.wo-chips{display:flex; flex-wrap:wrap; gap:6px; margin-bottom:10px;}
+.wo-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:10px;}
+.wo-grid .field input{padding:8px 10px; font-size:13px;}
+.wo-actionbar{position:sticky; bottom:0; background:var(--surface); border-top:1px solid var(--border); padding:12px 16px; display:flex; gap:10px; justify-content:flex-end; margin:16px -16px -16px; border-radius:0 0 12px 12px;}
+.sig-instructions{font-size:12.5px; color:var(--accent-strong); background:var(--accent-soft); border-radius:9px; padding:9px 12px; margin-bottom:12px; display:flex; gap:8px; align-items:center;}
+.wo-page-wrap{position:relative; margin-bottom:14px; border:1px solid var(--border); border-radius:10px; overflow:hidden; background:#fff;}
+.wo-page-wrap img{display:block; width:100%; height:auto; cursor:crosshair;}
+.stamp{position:absolute; transform:translate(-50%,-50%); pointer-events:none;}
+.stamp img{width:100%; display:block; pointer-events:none;}
+.stamp .rm{position:absolute; top:-8px; right:-8px; width:20px; height:20px; border-radius:50%; background:var(--danger); color:#fff; border:2px solid var(--surface); font-size:12px; line-height:1; display:flex; align-items:center; justify-content:center; cursor:pointer; pointer-events:auto;}
+.wo-busy{display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-muted);}
+.spinner{width:14px; height:14px; border-radius:50%; border:2px solid var(--border); border-top-color:var(--accent); animation:spin .7s linear infinite;}
+@keyframes spin{to{transform:rotate(360deg);}}
+
+/* signature pad */
+.sig-overlay{position:fixed; inset:0; background:rgba(10,20,20,.55); z-index:70; display:flex; align-items:center; justify-content:center; padding:16px;}
+.sig-box{background:var(--surface); border-radius:16px; padding:18px; width:100%; max-width:420px; display:flex; flex-direction:column; gap:12px; box-shadow:var(--shadow);}
+.sig-box h3{font-size:15px; font-weight:800;}
+.sig-pad-wrap{border:1px dashed var(--border); border-radius:10px; overflow:hidden; background:#fff;}
+.sig-pad-wrap canvas{width:100%; height:160px; display:block; touch-action:none;}
+.sig-actions{display:flex; justify-content:space-between; gap:8px;}
+
+/* logo / brand */
+.brand-row{display:flex; align-items:center; gap:12px;}
+.brand-logo{height:46px; width:auto; display:block; flex:none;}
+
+/* reviewed checkbox on new-lead cards */
+.reviewed-row{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer;}
+.reviewed-row input{width:14px; height:14px; accent-color:var(--accent);}
+
+/* notes log */
+.note-log{display:flex; flex-direction:column; gap:8px; max-height:220px; overflow-y:auto; padding-right:2px;}
+.note-item{background:var(--surface-2); border-radius:9px; padding:8px 10px; font-size:12.5px; line-height:1.4;}
+.note-item .meta{font-size:10.5px; font-weight:700; color:var(--text-muted); margin-bottom:3px; text-transform:uppercase; letter-spacing:.02em;}
+.add-note-row{display:flex; gap:8px; align-items:flex-end;}
+.add-note-row textarea{flex:1; min-height:44px;}
+.add-note-row button{flex:none;}
+
+/* scheduler */
+.sched-box{border:1px solid var(--border); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:10px;}
+.sched-current{background:var(--accent-soft); color:var(--accent-strong); border-radius:9px; padding:9px 11px; font-size:12.5px; font-weight:600; display:flex; justify-content:space-between; align-items:center; gap:8px;}
+.sched-row{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+
+/* slot list (shared by scheduler + calendar tab) */
+.slot-list{display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto;}
+.slot-item{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 11px; border-radius:9px; border:1px solid var(--border); font-size:12.5px;}
+.slot-item.available{background:var(--success-soft); border-color:transparent;}
+.slot-item.blocked{background:var(--surface-2); opacity:.75;}
+.slot-item.closed{background:var(--surface-2); opacity:.55;}
+.slot-item.booked{background:var(--accent-soft); border-color:transparent;}
+.slot-time{font-weight:700; font-variant-numeric:tabular-nums;}
+.slot-status{font-size:11px; color:var(--text-muted); margin-top:1px;}
+.slot-item button{font-size:11.5px; padding:5px 10px;}
+
+.cal-controls{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;}
+.cal-controls .field{min-width:170px;}
+
+/* login */
+.login-screen{position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:16px; z-index:100;}
+.login-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px 24px; width:100%; max-width:360px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--shadow);}
+.login-card .brand-row{justify-content:center; margin-bottom:4px;}
+.login-card h2{font-size:17px; font-weight:800; text-align:center;}
+.user-chip-wrap{display:flex; align-items:center; gap:8px;}
+.user-chip{font-size:12.5px; font-weight:600; color:var(--text-muted);}
+</style>
+</head>
+<body>
+
+<div class="login-screen" id="loginScreen">
+  <div class="login-card">
+    <div class="brand-row"><img class="brand-logo" src="assets/nations-pure-logo.png" alt="Nation's Pure Water Systems" style="height:40px;"></div>
+    <h2>Sign in</h2>
+    <div class="field"><label>Email</label><input type="email" id="loginEmail" autocomplete="username"></div>
+    <div class="field"><label>Password</label><input type="password" id="loginPassword" autocomplete="current-password"></div>
+    <div class="warn-note" id="loginError" hidden></div>
+    <button class="btn btn-primary" id="loginBtn" style="justify-content:center;">Sign in</button>
+    <button class="link-btn" id="forgotBtn" style="align-self:center; color:var(--text-muted);">Forgot password?</button>
+  </div>
+</div>
+
+<div id="appRoot" hidden>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="brand-row">
+        <img class="brand-logo" src="assets/nations-pure-logo.png" alt="Nation's Pure Water Systems">
+        <div>
+          <div class="name">Nation's Pure Leads</div>
+          <div class="tag">Call in → In-Home Visit → Quote → Won or Lost</div>
+        </div>
+      </div>
+    </div>
+    <div class="top-controls" id="leadsControls">
+      <div class="search">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>
+        <input id="searchInput" type="text" placeholder="Search name or phone">
+      </div>
+      <button class="btn btn-primary" id="newLeadBtn">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg>
+        New lead
+      </button>
+      <div class="user-chip-wrap">
+        <span class="user-chip" id="userChip"></span>
+        <button class="btn btn-ghost" id="signOutBtn">Sign out</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab active" id="tabLeads">Leads</button>
+    <button class="tab" id="tabCal">Calendar</button>
+    <button class="tab" id="tabDocs">Documents</button>
+  </div>
+
+  <div id="leadsView">
+    <div class="stats-row" id="statsRow"></div>
+    <div class="board-scroll">
+      <div class="board" id="board"></div>
+    </div>
+  </div>
+
+  <div id="calendarView" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Water specialist calendar</h2>
+          <div class="panel-sub">Weekdays 8am–4pm are bookable by default · evenings and Saturdays stay closed until a specialist opens them, per the Sales SOP</div>
+        </div>
+      </div>
+      <div class="cal-controls">
+        <div class="field"><label>Water specialist</label><input type="text" id="calRep" list="repListCal" placeholder="Choose or type a name"></div>
+        <div class="field"><label>Date</label><input type="date" id="calDate"></div>
+      </div>
+      <div id="calSlots"></div>
+    </div>
+  </div>
+  <datalist id="repListCal"></datalist>
+
+  <div id="documentsView" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Work orders</h2>
+          <div class="panel-sub">Fill, sign and save a work order — generates a completed PDF from your real form</div>
+        </div>
+        <button class="btn btn-primary" id="newWoBtn">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6"><path d="M12 5v14M5 12h14"/></svg>
+          New work order
+        </button>
+      </div>
+      <div id="woListEl"></div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Equipment brochures</h2>
+          <div class="panel-sub">Spec sheets and brochures anyone can pull up during a visit</div>
+        </div>
+      </div>
+      <div class="upload-row" id="brochureUploadRow"></div>
+      <div class="brochure-grid" id="brochureGrid"></div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay" hidden>
+  <div class="modal" id="modal"></div>
+</div>
+
+<div class="wo-overlay" id="woOverlay" hidden>
+  <div class="wo-shell" id="woShell"></div>
+</div>
+
+<div class="sig-overlay" id="sigOverlay" hidden>
+  <div class="sig-box">
+    <h3>Draw signature</h3>
+    <div class="sig-pad-wrap"><canvas id="sigCanvas" width="600" height="200"></canvas></div>
+    <div class="sig-actions">
+      <button class="btn" id="sigClearBtn">Clear</button>
+      <div style="display:flex; gap:8px;">
+        <button class="btn" id="sigCancelBtn">Cancel</button>
+        <button class="btn btn-primary" id="sigDoneBtn">Use this signature</button>
+      </div>
+    </div>
+  </div>
+</div>
+</div><!-- /appRoot -->
+
+<div class="toast" id="toast"></div>
+
+<script src="config.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.2/dist/umd/supabase.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+<script>
+const STAGES = [
+  {id:'new', label:'New Lead', dot:''},
+  {id:'scheduled', label:'In-Home Scheduled', dot:''},
+  {id:'quoted', label:'Quoted', dot:''},
+  {id:'won', label:'Won', dot:'success'},
+  {id:'lost', label:'Lost', dot:'danger'},
+];
+const REP_SUGGESTIONS = ['Chris Novotny','Dylen Whitlock'];
+
+const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+let currentUser = null; // {id, email, name}
+let realtimeChannel = null;
+
+let leads = [];
+let brochures = [];
+let workOrders = [];
+let state = { view:'leads', search:'', editingId:null, adding:false, confirmingDeleteId:null };
+
+function $(sel, root=document){ return root.querySelector(sel); }
+function el(tag, attrs={}, ...kids){
+  const n = document.createElement(tag);
+  for(const k in attrs){
+    if(k==='class') n.className = attrs[k];
+    else if(k==='html') n.innerHTML = attrs[k];
+    else if(k.startsWith('on')) n.addEventListener(k.slice(2), attrs[k]);
+    else n.setAttribute(k, attrs[k]);
+  }
+  for(const kid of kids){ if(kid==null) continue; n.append(kid.nodeType ? kid : document.createTextNode(kid)); }
+  return n;
+}
+function timeAgo(ts){
+  if(!ts) return '';
+  const s = Math.max(1, Math.floor((Date.now()-ts)/1000));
+  if(s<60) return 'just now';
+  const m = Math.floor(s/60); if(m<60) return m+'m ago';
+  const h = Math.floor(m/60); if(h<24) return h+'h ago';
+  const d = Math.floor(h/24); if(d<7) return d+'d ago';
+  return new Date(ts).toLocaleDateString(undefined,{month:'short',day:'numeric'});
+}
+function esc(s){ return (s||'').replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function showToast(msg){
+  const t = $('#toast'); t.textContent = msg; t.classList.add('show');
+  clearTimeout(showToast._t); showToast._t = setTimeout(()=>t.classList.remove('show'), 2600);
+}
+function triggerDownload(blob, filename){
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url), 4000);
+}
+
+/* ================= AUTH ================= */
+async function boot(){
+  const { data:{ session } } = await sb.auth.getSession();
+  if(session) onSignedIn(session);
+  sb.auth.onAuthStateChange((event, session)=>{
+    if(event==='SIGNED_IN' && session) onSignedIn(session);
+    if(event==='SIGNED_OUT') onSignedOut();
+  });
+}
+function onSignedIn(session){
+  currentUser = {
+    id: session.user.id, email: session.user.email,
+    name: session.user.user_metadata?.name || (session.user.email||'').split('@')[0],
+  };
+  $('#loginScreen').hidden = true;
+  $('#appRoot').hidden = false;
+  $('#userChip').textContent = currentUser.name;
+  populateRepDatalist($('#repListCal'));
+  fetchLeads(); fetchBrochures(); fetchWorkOrders();
+  subscribeRealtime();
+}
+function onSignedOut(){
+  currentUser = null;
+  $('#appRoot').hidden = true;
+  $('#loginScreen').hidden = false;
+  $('#loginPassword').value = '';
+  if(realtimeChannel){ sb.removeChannel(realtimeChannel); realtimeChannel = null; }
+}
+function subscribeRealtime(){
+  if(realtimeChannel) return;
+  realtimeChannel = sb.channel('db-changes')
+    .on('postgres_changes', {event:'*', schema:'public', table:'leads'}, ()=>fetchLeads())
+    .on('postgres_changes', {event:'*', schema:'public', table:'brochures'}, ()=>fetchBrochures())
+    .on('postgres_changes', {event:'*', schema:'public', table:'work_orders'}, ()=>fetchWorkOrders())
+    .on('postgres_changes', {event:'*', schema:'public', table:'blocks'}, ()=>{
+      if(activeBlocksQuery) loadBlocksFor(activeBlocksQuery.rep, activeBlocksQuery.date, activeBlocksQuery.onChange);
+    })
+    .subscribe();
+}
+async function doLogin(){
+  const email = $('#loginEmail').value.trim();
+  const password = $('#loginPassword').value;
+  $('#loginError').hidden = true;
+  if(!email || !password){ $('#loginError').hidden=false; $('#loginError').textContent='Enter your email and password'; return; }
+  const btn = $('#loginBtn'); btn.disabled = true; btn.textContent = 'Signing in…';
+  const { error } = await sb.auth.signInWithPassword({ email, password });
+  btn.disabled = false; btn.textContent = 'Sign in';
+  if(error){ $('#loginError').hidden = false; $('#loginError').textContent = error.message || "Couldn't sign in"; }
+}
+$('#loginBtn').addEventListener('click', doLogin);
+$('#loginPassword').addEventListener('keydown', e=>{ if(e.key==='Enter') doLogin(); });
+$('#forgotBtn').addEventListener('click', async ()=>{
+  const email = $('#loginEmail').value.trim();
+  if(!email){ showToast('Enter your email first'); return; }
+  const { error } = await sb.auth.resetPasswordForEmail(email);
+  showToast(error ? "Couldn't send reset email" : 'Check your email for a reset link');
+});
+$('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
+
+/* ================= DATA MAPPING ================= */
+function mapLead(r){
+  return {
+    id:r.id, name:r.name, phone:r.phone, address:r.address, need:r.need, stage:r.stage,
+    requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
+    assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
+    noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
+    createdAt:r.created_at, updatedAt:r.updated_at,
+  };
+}
+async function fetchLeads(){
+  const { data, error } = await sb.from('leads').select('*').order('created_at',{ascending:false}).limit(500);
+  if(error){ console.error(error); showToast('Connection issue — showing last known data'); return; }
+  leads = data.map(mapLead);
+  render();
+  if(state.editingId) openModal();
+}
+async function fetchBrochures(){
+  const { data, error } = await sb.from('brochures').select('*').order('uploaded_at',{ascending:false}).limit(200);
+  if(error){ console.error(error); return; }
+  brochures = await Promise.all(data.map(async b=>({
+    id:b.id, name:b.name, category:b.category, contentType:b.content_type,
+    uploadedBy:b.uploaded_by, uploadedByName:b.uploaded_by_name, uploadedAt:b.uploaded_at,
+    storagePath:b.storage_path, url: await signedUrl('brochures', b.storage_path),
+  })));
+  renderDocumentsView();
+}
+async function fetchWorkOrders(){
+  const { data, error } = await sb.from('work_orders').select('*').order('created_at',{ascending:false}).limit(200);
+  if(error){ console.error(error); return; }
+  workOrders = await Promise.all(data.map(async w=>({
+    id:w.id, name:w.name, leadId:w.lead_id, storagePath:w.storage_path,
+    createdBy:w.created_by, createdByName:w.created_by_name, createdAt:w.created_at,
+    url: await signedUrl('work-orders', w.storage_path),
+  })));
+  renderDocumentsView();
+  render();
+}
+
+/* ================= STORAGE ================= */
+async function uploadToBucket(bucket, blob, filename){
+  const safe = (filename||'file').replace(/[^a-zA-Z0-9.\-_]/g,'_');
+  const path = crypto.randomUUID()+'-'+safe;
+  const { error } = await sb.storage.from(bucket).upload(path, blob, { contentType: blob.type || undefined });
+  if(error) throw error;
+  return path;
+}
+async function signedUrl(bucket, path){
+  if(!path) return null;
+  const { data, error } = await sb.storage.from(bucket).createSignedUrl(path, 60*60*24);
+  if(error){ console.error(error); return null; }
+  return data.signedUrl;
+}
+async function deleteFromBucket(bucket, path){
+  if(!path) return;
+  try{ await sb.storage.from(bucket).remove([path]); }catch(e){}
+}
+
+/* ---------- tabs ---------- */
+function setView(v){
+  state.view = v;
+  $('#tabLeads').classList.toggle('active', v==='leads');
+  $('#tabDocs').classList.toggle('active', v==='documents');
+  $('#tabCal').classList.toggle('active', v==='calendar');
+  $('#leadsView').hidden = v!=='leads';
+  $('#leadsControls').style.visibility = v==='leads' ? 'visible' : 'hidden';
+  $('#documentsView').hidden = v!=='documents';
+  $('#calendarView').hidden = v!=='calendar';
+  if(v==='calendar'){ populateRepDatalist($('#repListCal')); renderCalendarTab(); }
+}
+$('#tabLeads').addEventListener('click', ()=>setView('leads'));
+$('#tabDocs').addEventListener('click', ()=>setView('documents'));
+$('#tabCal').addEventListener('click', ()=>setView('calendar'));
+
+/* ---------- leads board ---------- */
+function isOffHoursUnconfirmed(l){ return !!l.offHours && !l.repConfirmed && l.stage!=='won' && l.stage!=='lost'; }
+function matchesSearch(l){
+  if(!state.search) return true;
+  const q = state.search.toLowerCase();
+  return (l.name||'').toLowerCase().includes(q) || (l.phone||'').toLowerCase().includes(q);
+}
+function render(){ renderStats(); renderBoard(); }
+
+function renderStats(){
+  const row = $('#statsRow'); row.innerHTML = '';
+  const active = leads.filter(l=>l.stage!=='won' && l.stage!=='lost');
+  const needsConfirm = leads.filter(isOffHoursUnconfirmed).length;
+  const wonThisMonth = leads.filter(l=>{
+    if(l.stage!=='won') return false;
+    const d = new Date(l.updatedAt||l.createdAt||0), now = new Date();
+    return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
+  }).length;
+  row.append(el('div',{class:'chip'}, active.length+' active leads'));
+  row.append(el('div',{class:'chip'}, wonThisMonth+' won this month'));
+  if(needsConfirm>0){
+    row.append(el('div',{class:'chip warn', onclick:()=>{ state.search=''; $('#searchInput').value=''; scrollToFirstUnconfirmed(); }}, needsConfirm+' need rep confirmation'));
+  }
+}
+function scrollToFirstUnconfirmed(){
+  const card = document.querySelector('[data-unconfirmed="1"]');
+  if(card) card.scrollIntoView({behavior:'smooth', block:'center', inline:'center'});
+}
+function renderBoard(){
+  const board = $('#board'); board.innerHTML = '';
+  const filtered = leads.filter(matchesSearch);
+  for(const stage of STAGES){
+    let stageLeads = filtered.filter(l=>l.stage===stage.id);
+    stageLeads.sort((a,b)=>{
+      const au = isOffHoursUnconfirmed(a)?0:1, bu = isOffHoursUnconfirmed(b)?0:1;
+      if(au!==bu) return au-bu;
+      return (b.createdAt||0)-(a.createdAt||0);
+    });
+    const col = el('div',{class:'col'},
+      el('div',{class:'col-head'},
+        el('div',{class:'col-title'}, el('span',{class:'dot '+stage.dot}), stage.label),
+        el('div',{class:'col-count'}, String(stageLeads.length))
+      )
+    );
+    const body = el('div',{class:'col-body'});
+    if(stageLeads.length===0){ body.append(el('div',{class:'col-empty'}, 'No leads here')); }
+    for(const lead of stageLeads){ body.append(renderCard(lead)); }
+    col.append(body);
+    board.append(col);
+  }
+}
+function renderCard(lead){
+  const unconfirmed = isOffHoursUnconfirmed(lead);
+  const card = el('div',{class:'card', 'data-unconfirmed': unconfirmed?'1':'0', onclick:(e)=>{ if(e.target.tagName!=='SELECT') openEdit(lead.id); }});
+  card.append(el('div',{class:'card-name'}, lead.name||'Unnamed lead'));
+  if(lead.need) card.append(el('div',{class:'card-need'}, lead.need));
+  const meta = el('div',{class:'card-meta'});
+  if(lead.assignedRep) meta.append(el('span',{class:'badge badge-rep'}, lead.assignedRep));
+  if(lead.apptDate && lead.apptStart){
+    meta.append(el('span',{class:'badge badge-appt'}, fmtApptShort(lead.apptDate, lead.apptStart)));
+  } else if(lead.requestedWindow){
+    meta.append(el('span',{class:'badge badge-time'}, lead.requestedWindow));
+  }
+  if(unconfirmed) meta.append(el('span',{class:'badge badge-warn'}, 'Needs rep confirm'));
+  card.append(meta);
+  if(lead.stage==='new'){
+    const cb = el('input',{type:'checkbox', onchange:e=>{ e.stopPropagation(); toggleReviewed(lead, e.target.checked); }});
+    cb.checked = !!lead.reviewed;
+    card.append(el('label',{class:'reviewed-row', onclick:e=>e.stopPropagation()}, cb, 'Reviewed'));
+  }
+  const sel = el('select',{onclick:e=>e.stopPropagation(), onchange:e=>changeStage(lead, e.target.value)});
+  for(const s of STAGES){ sel.append(el('option',{value:s.id, ...(s.id===lead.stage?{selected:'selected'}:{})}, s.label)); }
+  card.append(sel);
+  return card;
+}
+async function toggleReviewed(lead, val){
+  const { error } = await sb.from('leads').update({ reviewed: val, updated_at: Date.now() }).eq('id', lead.id);
+  if(error) showToast("Couldn't update that");
+}
+async function changeStage(lead, newStage){
+  const { error } = await sb.from('leads').update({ stage:newStage, updated_at: Date.now() }).eq('id', lead.id);
+  if(error){ showToast("Couldn't move that lead"); render(); }
+}
+function openAdd(){ state.adding = true; state.editingId = null; openModal(); }
+function openEdit(id){ state.adding = false; state.editingId = id; openModal(); }
+function closeModal(){
+  $('#overlay').hidden = true; $('#modal').innerHTML = '';
+  state.adding=false; state.editingId=null; state.confirmingDeleteId=null;
+  activeBlocksQuery = null;
+}
+
+function openModal(){
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  const lead = state.editingId ? leads.find(l=>l.id===state.editingId) : null;
+
+  const form = el('div',{class:'modal'});
+  form.append(el('div',{class:'modal-head'},
+    el('h2',{}, lead ? 'Edit lead' : 'New lead'),
+    el('button',{class:'icon-btn', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})
+  ));
+
+  const nameF = el('input',{type:'text', id:'f-name', placeholder:'Customer name'}); nameF.value = lead?.name||'';
+  const phoneF = el('input',{type:'tel', id:'f-phone', placeholder:'(214) 555-0100'}); phoneF.value = lead?.phone||'';
+  const addrF = el('input',{type:'text', id:'f-addr', placeholder:'Street, city'}); addrF.value = lead?.address||'';
+  const needF = el('textarea',{id:'f-need', placeholder:'What do they need? Softener, filtration, testing...'}); needF.value = lead?.need||'';
+  const windowF = el('input',{type:'text', id:'f-window', placeholder:'e.g. Thursday afternoon'}); windowF.value = lead?.requestedWindow||'';
+  const repF = el('input',{type:'text', id:'f-rep', placeholder:'Water specialist', list:'repList'}); repF.value = lead?.assignedRep||'';
+  const repList = el('datalist',{id:'repList'}); REP_SUGGESTIONS.forEach(r=>repList.append(el('option',{value:r})));
+  const stageF = el('select',{id:'f-stage'});
+  STAGES.forEach(s=>stageF.append(el('option',{value:s.id, ...(s.id===(lead?.stage||'new')?{selected:'selected'}:{})}, s.label)));
+
+  const offToggle = el('input',{type:'checkbox', id:'f-offhours'}); offToggle.checked = !!lead?.offHours;
+  const confirmToggle = el('input',{type:'checkbox', id:'f-confirmed'}); confirmToggle.checked = !!lead?.repConfirmed;
+  const confirmRow = el('div',{class:'toggle-row', id:'confirmRow', hidden: !offToggle.checked},
+    el('div',{}, el('div',{class:'lbl'}, 'Water specialist confirmed?'), el('div',{class:'sub'}, "Don't promise this time until they have")),
+    el('label',{class:'switch'}, confirmToggle, el('span',{class:'track'}, el('span',{class:'thumb'})))
+  );
+  offToggle.addEventListener('change', ()=>{ confirmRow.hidden = !offToggle.checked; if(!offToggle.checked) confirmToggle.checked=false; });
+
+  form.append(
+    el('div',{class:'field'}, el('label',{}, 'Name'), nameF),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'Phone'), phoneF),
+      el('div',{class:'field'}, el('label',{}, 'Water specialist'), repF, repList)
+    ),
+    el('div',{class:'field'}, el('label',{}, 'Address'), addrF),
+    el('div',{class:'field'}, el('label',{}, 'What they need'), needF),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'Requested window'), windowF),
+      el('div',{class:'field'}, el('label',{}, 'Stage'), stageF)
+    ),
+    el('div',{class:'toggle-row'},
+      el('div',{}, el('div',{class:'lbl'}, 'Evening or Saturday ask'), el('div',{class:'sub'}, 'Outside the normal Mon–Fri 8–4 window')),
+      el('label',{class:'switch'}, offToggle, el('span',{class:'track'}, el('span',{class:'thumb'})))
+    ),
+    confirmRow
+  );
+
+  if(lead){
+    const label = lead.createdByName ? 'Added by '+esc(lead.createdByName)+' · '+timeAgo(lead.createdAt) : 'Added '+timeAgo(lead.createdAt);
+    form.append(el('div',{class:'attrib'}, label));
+
+    form.append(buildSchedBox(lead));
+    form.append(buildNotesSection(lead));
+
+    const leadDocs = workOrders.filter(w=>w.leadId===lead.id);
+    const docsBox = el('div',{class:'lead-docs'}, el('div',{class:'lbl'}, 'Work orders'));
+    if(leadDocs.length===0){ docsBox.append(el('div',{class:'doc-row', style:'color:var(--text-muted)'}, 'None yet')); }
+    for(const w of leadDocs){
+      docsBox.append(el('div',{class:'doc-row'},
+        el('span',{}, timeAgo(w.createdAt)),
+        w.url ? el('a',{href:w.url, target:'_blank', rel:'noopener'}, 'Open PDF') : el('span',{}, '—')
+      ));
+    }
+    docsBox.append(el('button',{class:'btn', style:'align-self:flex-start;', onclick:()=>openWorkOrder(lead)}, '+ Fill work order'));
+    form.append(docsBox);
+  } else {
+    form.append(el('div',{class:'field'}, el('label',{}, 'Notes'), el('textarea',{id:'f-newnote', placeholder:'Anything worth noting about this lead...'})));
+  }
+
+  const actions = el('div',{class:'modal-actions'});
+  if(lead){
+    if(state.confirmingDeleteId===lead.id){
+      actions.append(el('div',{class:'confirm-del'}, 'Delete this lead?',
+        el('button',{class:'btn', onclick:()=>{ state.confirmingDeleteId=null; openModal(); }}, 'Cancel'),
+        el('button',{class:'btn', style:'color:#fff;background:var(--danger);border-color:var(--danger)', onclick:()=>doDelete(lead.id)}, 'Delete')
+      ));
+    } else {
+      actions.append(el('button',{class:'link-btn', onclick:()=>{ state.confirmingDeleteId=lead.id; openModal(); }}, 'Delete lead'));
+    }
+  } else { actions.append(el('span',{})); }
+  actions.append(el('button',{class:'btn btn-primary', onclick:()=>saveLead(lead)}, lead ? 'Save changes' : 'Add lead'));
+  form.append(actions);
+
+  modal.append(form);
+  overlay.hidden = false;
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
+  setTimeout(()=>nameF.focus(), 50);
+}
+
+async function saveLead(existing){
+  const data = {
+    name: $('#f-name').value.trim(), phone: $('#f-phone').value.trim(), address: $('#f-addr').value.trim(),
+    need: $('#f-need').value.trim(), requested_window: $('#f-window').value.trim(), assigned_rep: $('#f-rep').value.trim(),
+    stage: $('#f-stage').value,
+    off_hours: $('#f-offhours').checked, rep_confirmed: $('#f-confirmed').checked, updated_at: Date.now(),
+  };
+  if(!data.name){ showToast('Add a name first'); return; }
+  try{
+    if(existing){
+      const { error } = await sb.from('leads').update(data).eq('id', existing.id);
+      if(error) throw error;
+    } else {
+      const noteTxt = $('#f-newnote')?.value.trim();
+      data.note_log = noteTxt ? [{text:noteTxt, by:currentUser.id, byName:currentUser.name, at:Date.now()}] : [];
+      data.created_at = Date.now(); data.created_by = currentUser.id; data.created_by_name = currentUser.name;
+      const { error } = await sb.from('leads').insert(data);
+      if(error) throw error;
+    }
+    closeModal();
+    showToast(existing ? 'Saved' : 'Lead added');
+  }catch(err){ console.error(err); showToast("Couldn't save that lead"); }
+}
+async function addNote(lead){
+  const ta = $('#f-newnote');
+  const txt = ta.value.trim();
+  if(!txt) return;
+  const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
+  const entry = {text:txt, by:currentUser.id, byName:currentUser.name, at:Date.now()};
+  const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
+  if(error){ showToast("Couldn't add that note"); return; }
+  showToast('Note added');
+  openModal();
+}
+function buildNotesSection(lead){
+  const box = el('div',{class:'field'}, el('label',{}, 'Notes'));
+  const log = el('div',{class:'note-log'});
+  const entries = Array.isArray(lead.noteLog) ? lead.noteLog.slice().reverse() : [];
+  if(lead.notes){ log.append(el('div',{class:'note-item'}, el('div',{class:'meta'}, 'Earlier note'), lead.notes)); }
+  for(const n of entries){
+    log.append(el('div',{class:'note-item'}, el('div',{class:'meta'}, (n.byName || 'Someone')+' · '+timeAgo(n.at)), n.text));
+  }
+  if(entries.length===0 && !lead.notes){ log.append(el('div',{class:'empty-note'}, 'No notes yet')); }
+  box.append(log);
+  const ta = el('textarea',{id:'f-newnote', placeholder:'Add a note...'});
+  box.append(el('div',{class:'add-note-row'}, ta, el('button',{class:'btn', onclick:()=>addNote(lead)}, 'Add')));
+  return box;
+}
+async function doDelete(id){
+  const { error } = await sb.from('leads').delete().eq('id', id);
+  if(error){ showToast("Couldn't delete that lead"); return; }
+  closeModal();
+  showToast('Lead deleted');
+}
+
+$('#newLeadBtn').addEventListener('click', openAdd);
+$('#searchInput').addEventListener('input', e=>{ state.search = e.target.value; renderBoard(); });
+
+/* ---------- documents view: brochures ---------- */
+function renderDocumentsView(){
+  renderBrochures();
+  renderWoList();
+}
+function renderBrochures(){
+  const row = $('#brochureUploadRow'); row.innerHTML = '';
+  const nameF = el('input',{type:'text', id:'br-name', placeholder:'e.g. GDS Turbidity Clearing System'});
+  const catF = el('input',{type:'text', id:'br-cat', placeholder:'e.g. Softeners'});
+  const fileF = el('input',{type:'file', id:'br-file', accept:'application/pdf,image/*'});
+  const pick = el('label',{class:'filepick'},
+    el('svg',{width:'14',height:'14',viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'2.4', html:'<path d="M12 3v12m0 0l-4-4m4 4l4-4M4 17v2a2 2 0 002 2h12a2 2 0 002-2v-2"/>'}),
+    'Choose file', fileF
+  );
+  const fname = el('span',{style:'font-size:11.5px;color:var(--text-muted);'}, '');
+  fileF.addEventListener('change', ()=>{ fname.textContent = fileF.files[0]?.name || ''; });
+  row.append(
+    el('div',{class:'field'}, el('label',{}, 'Name'), nameF),
+    el('div',{class:'field'}, el('label',{}, 'Category'), catF),
+    el('div',{class:'field'}, el('label',{}, 'File'), pick, fname),
+    el('button',{class:'btn btn-primary', onclick:()=>uploadBrochure(nameF.value, catF.value, fileF.files[0])}, 'Upload')
+  );
+  const grid = $('#brochureGrid'); grid.innerHTML = '';
+  if(brochures.length===0){ grid.append(el('div',{class:'empty-note'}, 'No brochures yet')); }
+  for(const b of brochures){
+    const card = el('div',{class:'brochure-card'}, el('div',{class:'brochure-name'}, b.name||'Untitled'));
+    if(b.category) card.append(el('div',{class:'brochure-cat'}, b.category));
+    const actions = el('div',{class:'brochure-actions'});
+    if(b.url) actions.append(el('a',{href:b.url, target:'_blank', rel:'noopener'}, 'Open'));
+    actions.append(el('button',{class:'del', onclick:()=>deleteBrochure(b)}, 'Delete'));
+    card.append(actions);
+    grid.append(card);
+  }
+}
+async function uploadBrochure(name, cat, file){
+  if(!file){ showToast('Choose a file first'); return; }
+  if(!name || !name.trim()){ showToast('Give it a name'); return; }
+  try{
+    const path = await uploadToBucket('brochures', file, file.name);
+    const { error } = await sb.from('brochures').insert({
+      name:name.trim(), category:(cat||'').trim(), storage_path:path, content_type:file.type||'',
+      uploaded_by: currentUser.id, uploaded_by_name: currentUser.name, uploaded_at: Date.now(),
+    });
+    if(error) throw error;
+    showToast('Brochure added');
+  }catch(err){ console.error(err); showToast("Couldn't upload that file"); }
+}
+async function deleteBrochure(b){
+  try{
+    const { error } = await sb.from('brochures').delete().eq('id', b.id);
+    if(error) throw error;
+    await deleteFromBucket('brochures', b.storagePath);
+    showToast('Brochure removed');
+  }catch(err){ showToast("Couldn't remove that"); }
+}
+
+/* ---------- documents view: work orders list ---------- */
+function renderWoList(){
+  const list = $('#woListEl'); list.innerHTML = '';
+  if(workOrders.length===0){ list.append(el('div',{class:'empty-note'}, 'No completed work orders yet')); return; }
+  for(const w of workOrders){
+    const lead = leads.find(l=>l.id===w.leadId);
+    list.append(el('div',{class:'wo-list-row'},
+      el('div',{class:'wo-list-main'},
+        el('div',{}, w.name||'Unnamed'),
+        el('div',{class:'wo-list-sub'}, (lead?('For '+lead.name+' · '):'')+timeAgo(w.createdAt))
+      ),
+      w.url ? el('a',{href:w.url, target:'_blank', rel:'noopener', class:'btn'}, 'Open PDF') : el('span',{class:'wo-list-sub'}, 'Failed to save')
+    ));
+  }
+}
+$('#newWoBtn').addEventListener('click', ()=>openWorkOrder(null));
+
+/* ================= SCHEDULING / CALENDAR ================= */
+const SLOTS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'];
+function slotLabel(s){
+  const [h,m] = s.split(':').map(Number);
+  const ap = h<12 ? 'AM' : 'PM';
+  let hh = h%12; if(hh===0) hh = 12;
+  return hh+':'+String(m).padStart(2,'0')+' '+ap;
+}
+function fmtApptShort(date, slot){
+  const d = new Date(date+'T00:00:00');
+  return d.toLocaleDateString(undefined,{month:'short',day:'numeric'})+' · '+slotLabel(slot);
+}
+function isWeekdayDate(dateStr){
+  const d = new Date(dateStr+'T00:00:00');
+  const g = d.getDay();
+  return g>=1 && g<=5;
+}
+function isStandingOpen(dateStr, slot){
+  if(!isWeekdayDate(dateStr)) return false;
+  const h = parseInt(slot.split(':')[0],10);
+  return h>=8 && h<=16;
+}
+function blockDocId(rep, date, slot){
+  const repSlug = (rep||'unassigned').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'unassigned';
+  return repSlug+'_'+date+'_'+slot.replace(':','');
+}
+function populateRepDatalist(dl){
+  if(!dl) return;
+  dl.innerHTML = '';
+  REP_SUGGESTIONS.forEach(r=>dl.append(el('option',{value:r})));
+}
+
+let activeBlocksQuery = null; // {rep,date,onChange}
+async function loadBlocksFor(rep, date, onChange){
+  activeBlocksQuery = {rep, date, onChange};
+  if(!rep || !date){ onChange({}); return; }
+  const { data, error } = await sb.from('blocks').select('*').eq('rep', rep).eq('date', date);
+  if(error){ console.error(error); onChange({}); return; }
+  const map = {};
+  data.forEach(v=>{ map[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name }; });
+  onChange(map);
+}
+
+function renderSlotList(container, rep, date, blocksMap, mode, onBook){
+  container.innerHTML = '';
+  if(!rep || !date){ container.append(el('div',{class:'empty-note'}, 'Pick a water specialist and a date')); return; }
+  if(new Date(date+'T00:00:00').getDay()===0){
+    container.append(el('div',{class:'empty-note'}, "Nation's Pure doesn't book Sundays")); return;
+  }
+  const list = el('div',{class:'slot-list'});
+  for(const slot of SLOTS){
+    const rec = blocksMap[slot];
+    let cls, statusText, action = null;
+    if(rec && rec.status==='booked'){
+      cls = 'booked'; statusText = 'Booked — '+(rec.customerName||'a customer');
+      if(mode==='manage' && rec.leadId){
+        action = el('button',{class:'btn', onclick:()=>{ closeModal(); setView('leads'); openEdit(rec.leadId); }}, 'View lead');
+      }
+    } else if(rec && rec.status==='blocked'){
+      cls = 'blocked'; statusText = 'Blocked off';
+      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>unblockSlot(rep,date,slot)}, 'Unblock');
+    } else if(rec && rec.status==='open'){
+      cls = 'available'; statusText = 'Available (opened)';
+      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>closeSlotFn(rep,date,slot)}, 'Close');
+      if(mode==='book') action = el('button',{class:'btn btn-primary', onclick:()=>onBook(slot)}, 'Book');
+    } else if(isStandingOpen(date, slot)){
+      cls = 'available'; statusText = 'Available';
+      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>blockSlot(rep,date,slot)}, 'Block this time');
+      if(mode==='book') action = el('button',{class:'btn btn-primary', onclick:()=>onBook(slot)}, 'Book');
+    } else {
+      cls = 'closed'; statusText = 'Not offered (evening/Saturday)';
+      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>openSlotFn(rep,date,slot)}, 'Open this time');
+    }
+    const item = el('div',{class:'slot-item '+cls},
+      el('div',{}, el('div',{class:'slot-time'}, slotLabel(slot)), el('div',{class:'slot-status'}, statusText))
+    );
+    if(action) item.append(action);
+    list.append(item);
+  }
+  container.append(list);
+}
+
+async function blockSlot(rep,date,slot){
+  const { error } = await sb.from('blocks').upsert({ id:blockDocId(rep,date,slot), rep, date, slot, status:'blocked', created_by:currentUser.id, created_at:Date.now() });
+  if(error) showToast("Couldn't block that time");
+}
+async function unblockSlot(rep,date,slot){
+  const { error } = await sb.from('blocks').delete().eq('id', blockDocId(rep,date,slot));
+  if(error) showToast("Couldn't unblock that time");
+}
+async function openSlotFn(rep,date,slot){
+  const { error } = await sb.from('blocks').upsert({ id:blockDocId(rep,date,slot), rep, date, slot, status:'open', created_by:currentUser.id, created_at:Date.now() });
+  if(error) showToast("Couldn't open that time");
+}
+async function closeSlotFn(rep,date,slot){
+  const { error } = await sb.from('blocks').delete().eq('id', blockDocId(rep,date,slot));
+  if(error) showToast("Couldn't close that time");
+}
+
+/* ---- Calendar tab ---- */
+function renderCalendarTab(){
+  const repI = $('#calRep'), dateI = $('#calDate');
+  if(!dateI.value){ dateI.value = new Date().toISOString().slice(0,10); }
+  const rep = repI.value.trim(), date = dateI.value;
+  loadBlocksFor(rep, date, map=>renderSlotList($('#calSlots'), rep, date, map, 'manage'));
+}
+$('#calRep').addEventListener('input', renderCalendarTab);
+$('#calDate').addEventListener('input', renderCalendarTab);
+
+/* ---- scheduler inside lead modal ---- */
+function buildSchedBox(lead){
+  const box = el('div',{class:'sched-box'}, el('div',{class:'lbl', style:'font-size:12px;font-weight:700;color:var(--text-muted);'}, 'Appointment'));
+  if(lead.apptDate && lead.apptStart){
+    const row = el('div',{class:'sched-current'},
+      el('span',{}, (lead.assignedRep||'Unassigned')+' — '+fmtApptShort(lead.apptDate, lead.apptStart)),
+      el('button',{class:'btn', onclick:()=>clearAppointment(lead)}, 'Change')
+    );
+    box.append(row);
+    return box;
+  }
+  const repI = el('input',{type:'text', id:'sch-rep', list:'repList', placeholder:'Water specialist'});
+  repI.value = lead.assignedRep || '';
+  const dateI = el('input',{type:'date', id:'sch-date'});
+  dateI.value = new Date().toISOString().slice(0,10);
+  const slotsEl = el('div',{id:'sch-slots'});
+  const refresh = ()=>{
+    loadBlocksFor(repI.value.trim(), dateI.value, map=>{
+      renderSlotList(slotsEl, repI.value.trim(), dateI.value, map, 'book', slot=>bookAppointment(lead, repI.value.trim(), dateI.value, slot));
+    });
+  };
+  repI.addEventListener('input', refresh);
+  dateI.addEventListener('input', refresh);
+  box.append(
+    el('div',{class:'sched-row'},
+      el('div',{class:'field'}, el('label',{}, 'Water specialist'), repI),
+      el('div',{class:'field'}, el('label',{}, 'Date'), dateI)
+    ),
+    slotsEl
+  );
+  setTimeout(refresh, 0);
+  return box;
+}
+async function bookAppointment(lead, rep, date, slot){
+  if(!rep){ showToast('Pick a water specialist first'); return; }
+  try{
+    const { error: e1 } = await sb.from('blocks').upsert({
+      id:blockDocId(rep,date,slot), rep, date, slot, status:'booked',
+      lead_id:lead.id, customer_name:lead.name||'', created_by:currentUser.id, created_at:Date.now(),
+    });
+    if(e1) throw e1;
+    const upd = { assigned_rep:rep, appt_date:date, appt_start:slot, updated_at:Date.now() };
+    if(lead.stage==='new') upd.stage = 'scheduled';
+    const { error: e2 } = await sb.from('leads').update(upd).eq('id', lead.id);
+    if(e2) throw e2;
+    showToast('Appointment booked');
+    openModal();
+  }catch(err){ console.error(err); showToast("Couldn't book that appointment"); }
+}
+async function clearAppointment(lead){
+  try{
+    if(lead.apptDate && lead.apptStart && lead.assignedRep){
+      await sb.from('blocks').delete().eq('id', blockDocId(lead.assignedRep, lead.apptDate, lead.apptStart));
+    }
+    const { error } = await sb.from('leads').update({ appt_date:'', appt_start:'', updated_at:Date.now() }).eq('id', lead.id);
+    if(error) throw error;
+    openModal();
+  }catch(err){ showToast("Couldn't change that appointment"); }
+}
+
+/* ================= WORK ORDER BUILDER ================= */
+const PAGE_PX = {w:1275, h:1650};
+const PAGE_PT = {w:612, h:792};
+const PT_PER_PX = PAGE_PT.w / PAGE_PX.w; // uniform on both axes
+const TEMPLATE_URL = 'assets/work-order-template.pdf';
+const PAGE_IMGS = ['assets/wo-page-1.png','assets/wo-page-2.png','assets/wo-page-3.png'];
+
+const WO_FIELDS = {
+  name:{pdf:'Text Box 3', label:'Customer name', type:'text'},
+  date:{pdf:'Text Box 3_2', label:'Date', type:'text'},
+  address:{pdf:'Text Box 3_3', label:'Address', type:'text'},
+  city:{pdf:'Text Box 3_4', label:'City', type:'text'},
+  zip:{pdf:'Text Box 3_5', label:'Zip', type:'text'},
+  cell1:{pdf:'Text Box 3_6', label:'Cell phone', type:'text'},
+  cell2:{pdf:'Text Box 3_7', label:'Cell phone (2nd)', type:'text'},
+  email:{pdf:'Text Box 3_8', label:'E-mail', type:'text'},
+  homePhone:{pdf:'Text Box 3_12', label:'Home phone', type:'text'},
+  srcWell:{pdf:'Text Box 3_9', label:'Well', type:'check'},
+  srcCity:{pdf:'Text Box 3_10', label:'City water', type:'check'},
+  srcOther:{pdf:'Text Box 3_11', label:'Other source', type:'check'},
+  equip1:{pdf:'Text Box 3_14', label:'Equipment 1', type:'text'},
+  notes1:{pdf:'Text Box 3_13', label:'Notes 1', type:'text'},
+  equip2:{pdf:'Text Box 3_15', label:'Equipment 2', type:'text'},
+  notes2:{pdf:'Text Box 3_16', label:'Notes 2', type:'text'},
+  equip3:{pdf:'Text Box 3_17', label:'Equipment 3', type:'text'},
+  notes3:{pdf:'Text Box 3_18', label:'Notes 3', type:'text'},
+  equip4:{pdf:'Text Box 3_19', label:'Equipment 4', type:'text'},
+  notes4:{pdf:'Text Box 3_20', label:'Notes 4', type:'text'},
+  locOther:{pdf:'Text Box 3_21', label:'Other', type:'check'},
+  locShelter:{pdf:'Text Box 3_22', label:'Shelter', type:'check'},
+  locOutBuilding:{pdf:'Text Box 3_23', label:'Out building', type:'check'},
+  locGarage:{pdf:'Text Box 3_24', label:'Garage', type:'check'},
+  installTime:{pdf:'Text Box 3_25', label:'Installation time', type:'text'},
+  totalPrice:{pdf:'Text Box 3_28', label:'Total price (incl. tax)', type:'text'},
+  termsCreditCard:{pdf:'Text Box 3_26', label:'Credit card', type:'check'},
+  termsAPR:{pdf:'Text Box 3_27', label:'APR', type:'check'},
+  aprValue:{pdf:'Text Box 1', label:'APR %', type:'text'},
+  termsCash:{pdf:'Text Box 3_31', label:'Cash / check', type:'check'},
+  amountPaid:{pdf:'Text Box 3_29', label:'Amount paid', type:'text'},
+  financeSource:{pdf:'Text Box 3_36', label:'Financing source', type:'text'},
+  balance:{pdf:'Text Box 3_30', label:'Balance', type:'text'},
+  county:{pdf:'Text Box 3_32', label:'County', type:'text'},
+  notesLine1:{pdf:'Text Box 3_33', label:'Notes', type:'text'},
+  notesLine2:{pdf:'Text Box 3_34', label:'Notes (cont.)', type:'text'},
+  notesLine3:{pdf:'Text Box 3_35', label:'Notes (cont.)', type:'text'},
+  nameP2:{pdf:'Text Box 3_37', label:'', type:'text', hidden:true},
+  planRegular:{pdf:'Text Box 3_41', label:'Regularly Scheduled Maintenance Plan', type:'check'},
+  planTexas:{pdf:'Text Box 3_42', label:'Texas Service Plan', type:'check'},
+};
+const WO_GROUPS = [
+  {title:'Customer data', fields:['name','date','address','city','zip','cell1','cell2','email','homePhone']},
+  {title:'Water source', fields:['srcWell','srcCity','srcOther']},
+  {title:'Equipment', fields:['equip1','notes1','equip2','notes2','equip3','notes3','equip4','notes4']},
+  {title:'Install location', fields:['locOther','locShelter','locOutBuilding','locGarage']},
+  {title:'Installation', fields:['installTime']},
+  {title:'Purchase data', fields:['totalPrice','termsCreditCard','termsAPR','aprValue','termsCash','amountPaid','financeSource','balance','county']},
+  {title:'Notes', fields:['notesLine1','notesLine2','notesLine3']},
+  {title:'Service plan', fields:['planRegular','planTexas']},
+];
+
+let wo = null; // { leadId, values:{}, placements:[], pendingSig:null, busy:false }
+
+function openWorkOrder(lead){
+  wo = {
+    leadId: lead ? lead.id : null,
+    values: { name: lead?.name||'', address: lead?.address||'', cell1: lead?.phone||'' },
+    placements: [], pendingSig: null, busy: false,
+  };
+  closeModal();
+  $('#woOverlay').hidden = false;
+  renderWo();
+}
+function closeWorkOrder(){ wo = null; $('#woOverlay').hidden = true; }
+
+function renderWo(){
+  const shell = $('#woShell'); shell.innerHTML = '';
+  shell.append(el('div',{class:'wo-topbar'},
+    el('h2',{}, 'Work order'),
+    el('button',{class:'icon-btn', onclick:closeWorkOrder, html:'<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})
+  ));
+
+  for(const group of WO_GROUPS){
+    const fs = el('fieldset',{class:'wo-fieldset'}, el('legend',{}, group.title));
+    const checks = group.fields.filter(k=>WO_FIELDS[k].type==='check');
+    const texts = group.fields.filter(k=>WO_FIELDS[k].type==='text' && !WO_FIELDS[k].hidden);
+    if(checks.length){
+      const row = el('div',{class:'wo-chips'});
+      for(const k of checks){
+        const active = !!wo.values[k];
+        row.append(el('div',{class:'chip'+(active?' active':''), onclick:()=>{ wo.values[k] = !wo.values[k]; renderWo(); }}, WO_FIELDS[k].label));
+      }
+      fs.append(row);
+    }
+    if(texts.length){
+      const grid = el('div',{class:'wo-grid'});
+      for(const k of texts){
+        const f = WO_FIELDS[k];
+        if(k==='aprValue' && !wo.values.termsAPR) continue;
+        const input = el('input',{type:'text', oninput:e=>{ wo.values[k]=e.target.value; }});
+        input.value = wo.values[k]||'';
+        grid.append(el('div',{class:'field'}, el('label',{}, f.label), input));
+      }
+      fs.append(grid);
+    }
+    shell.append(fs);
+  }
+
+  const sigFs = el('fieldset',{class:'wo-fieldset'}, el('legend',{}, 'Signatures'));
+  sigFs.append(el('div',{class:'sig-instructions'},
+    el('svg',{width:'15',height:'15',viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'2.4', html:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'}),
+    wo.pendingSig ? 'Tap the spot on the form below where this signature goes.' : 'Draw a signature, then tap where it goes on the pages below.'
+  ));
+  sigFs.append(el('button',{class:'btn', onclick:openSigPad}, wo.pendingSig ? 'Redraw signature' : '+ Draw a signature'));
+  PAGE_IMGS.forEach((src, idx)=>{
+    const wrap = el('div',{class:'wo-page-wrap'});
+    const img = el('img',{src, alt:'Work order page '+(idx+1), onclick:(e)=>pageClick(e, idx)});
+    wrap.append(img);
+    wo.placements.filter(p=>p.pageIndex===idx).forEach((p)=>{
+      const globalIdx = wo.placements.indexOf(p);
+      const stamp = el('div',{class:'stamp', style:`left:${p.leftPct}%;top:${p.topPct}%;width:${p.wPct}%;`},
+        el('img',{src:p.dataUrl}),
+        el('div',{class:'rm', onclick:(e)=>{ e.stopPropagation(); wo.placements.splice(globalIdx,1); renderWo(); }}, '×')
+      );
+      wrap.append(stamp);
+    });
+    sigFs.append(wrap);
+  });
+  shell.append(sigFs);
+
+  const bar = el('div',{class:'wo-actionbar'});
+  if(wo.busy){
+    bar.append(el('div',{class:'wo-busy'}, el('div',{class:'spinner'}), 'Generating PDF…'));
+  } else {
+    bar.append(
+      el('button',{class:'btn', onclick:closeWorkOrder}, 'Cancel'),
+      el('button',{class:'btn btn-primary', onclick:finishWorkOrder}, 'Save & download')
+    );
+  }
+  shell.append(bar);
+}
+
+function pageClick(e, pageIndex){
+  if(!wo.pendingSig){ showToast('Draw a signature first'); return; }
+  const rect = e.currentTarget.getBoundingClientRect();
+  const xPx = (e.clientX-rect.left)/rect.width*PAGE_PX.w;
+  const yPx = (e.clientY-rect.top)/rect.height*PAGE_PX.h;
+  const stampWPt = 130, stampHPt = 130*(200/600);
+  const xPdfCenter = xPx*PT_PER_PX, yPdfCenter = PAGE_PT.h - yPx*PT_PER_PX;
+  wo.placements.push({
+    pageIndex, dataUrl: wo.pendingSig,
+    x: xPdfCenter - stampWPt/2, y: yPdfCenter - stampHPt/2, w: stampWPt, h: stampHPt,
+    leftPct: xPx/PAGE_PX.w*100, topPct: yPx/PAGE_PX.h*100, wPct: (stampWPt/PT_PER_PX)/PAGE_PX.w*100,
+  });
+  wo.pendingSig = null;
+  renderWo();
+}
+
+/* ---------- signature pad ---------- */
+let sigCtx = null, sigDrawing = false, sigLast = null, sigHasDrawn = false;
+function openSigPad(){
+  const canvas = $('#sigCanvas');
+  sigCtx = canvas.getContext('2d');
+  sigCtx.clearRect(0,0,canvas.width,canvas.height);
+  sigHasDrawn = false;
+  $('#sigOverlay').hidden = false;
+}
+function sigPos(e, canvas){
+  const r = canvas.getBoundingClientRect();
+  const cx = e.touches ? e.touches[0].clientX : e.clientX;
+  const cy = e.touches ? e.touches[0].clientY : e.clientY;
+  return { x:(cx-r.left)*(canvas.width/r.width), y:(cy-r.top)*(canvas.height/r.height) };
+}
+(function initSigPad(){
+  const canvas = $('#sigCanvas');
+  canvas.addEventListener('pointerdown', e=>{
+    sigDrawing = true; sigLast = sigPos(e, canvas);
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e=>{
+    if(!sigDrawing) return;
+    const p = sigPos(e, canvas);
+    sigCtx.strokeStyle = '#16262A'; sigCtx.lineWidth = 3; sigCtx.lineCap = 'round'; sigCtx.lineJoin = 'round';
+    sigCtx.beginPath(); sigCtx.moveTo(sigLast.x, sigLast.y); sigCtx.lineTo(p.x, p.y); sigCtx.stroke();
+    sigLast = p; sigHasDrawn = true;
+  });
+  canvas.addEventListener('pointerup', ()=>{ sigDrawing = false; });
+  canvas.addEventListener('pointerleave', ()=>{ sigDrawing = false; });
+})();
+$('#sigClearBtn').addEventListener('click', ()=>{
+  const canvas = $('#sigCanvas'); sigCtx.clearRect(0,0,canvas.width,canvas.height); sigHasDrawn = false;
+});
+$('#sigCancelBtn').addEventListener('click', ()=>{ $('#sigOverlay').hidden = true; });
+$('#sigDoneBtn').addEventListener('click', ()=>{
+  if(!sigHasDrawn){ showToast('Draw a signature first'); return; }
+  wo.pendingSig = $('#sigCanvas').toDataURL('image/png');
+  $('#sigOverlay').hidden = true;
+  renderWo();
+});
+
+/* ---------- PDF generation ---------- */
+function dataUrlToBytes(durl){
+  const b64 = durl.split(',')[1];
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i] = bin.charCodeAt(i);
+  return arr;
+}
+async function generateWorkOrderPdf(values, placements){
+  const resp = await fetch(TEMPLATE_URL);
+  if(!resp.ok) throw new Error('template fetch failed');
+  const bytes = new Uint8Array(await resp.arrayBuffer());
+  const pdfDoc = await PDFLib.PDFDocument.load(bytes);
+  const form = pdfDoc.getForm();
+  const setF = (name, val)=>{ try{ form.getTextField(name).setText(val||''); }catch(e){} };
+  for(const key in WO_FIELDS){
+    const f = WO_FIELDS[key];
+    let val = values[key];
+    if(key==='nameP2') val = values.name || '';
+    if(key==='date' && !val) val = new Date().toLocaleDateString();
+    setF(f.pdf, f.type==='check' ? (val ? 'x' : '') : val);
+  }
+  try{ form.flatten(); }catch(e){ console.warn('flatten failed', e); }
+  for(const p of placements){
+    const png = dataUrlToBytes(p.dataUrl);
+    const img = await pdfDoc.embedPng(png);
+    pdfDoc.getPages()[p.pageIndex].drawImage(img, {x:p.x, y:p.y, width:p.w, height:p.h});
+  }
+  return await pdfDoc.save();
+}
+
+async function finishWorkOrder(){
+  if(wo.busy) return;
+  wo.busy = true; renderWo();
+  try{
+    const bytes = await generateWorkOrderPdf(wo.values, wo.placements);
+    const blob = new Blob([bytes], {type:'application/pdf'});
+    const safeName = (wo.values.name||'work-order').trim().replace(/[^a-z0-9]+/gi,'-').replace(/^-+|-+$/g,'') || 'work-order';
+    const filename = safeName+'-work-order.pdf';
+    let storagePath = null;
+    try{ storagePath = await uploadToBucket('work-orders', blob, filename); }
+    catch(e){ console.error(e); showToast('Downloaded, but could not store a copy'); }
+    try{
+      await sb.from('work_orders').insert({
+        name: wo.values.name||'Unnamed', lead_id: wo.leadId||null, storage_path: storagePath,
+        created_by: currentUser.id, created_by_name: currentUser.name, created_at: Date.now(),
+      });
+    }catch(e){ console.error(e); }
+    triggerDownload(blob, filename);
+    showToast('Work order saved');
+    closeWorkOrder();
+  }catch(err){
+    console.error(err);
+    showToast("Couldn't generate the PDF");
+    wo.busy = false; renderWo();
+  }
+}
+
+boot();
+</script>
+</body>
+</html>
