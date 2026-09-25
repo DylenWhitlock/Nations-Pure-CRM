@@ -226,16 +226,20 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .sched-current{background:var(--accent-soft); color:var(--accent-strong); border-radius:9px; padding:9px 11px; font-size:12.5px; font-weight:600; display:flex; justify-content:space-between; align-items:center; gap:8px;}
 .sched-row{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
 
-/* slot list (shared by scheduler + calendar tab) */
-.slot-list{display:flex; flex-direction:column; gap:6px; max-height:320px; overflow-y:auto;}
-.slot-item{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:9px 11px; border-radius:9px; border:1px solid var(--border); font-size:12.5px;}
-.slot-item.available{background:var(--success-soft); border-color:transparent;}
-.slot-item.blocked{background:var(--surface-2); opacity:.75;}
-.slot-item.closed{background:var(--surface-2); opacity:.55;}
-.slot-item.booked{background:var(--accent-soft); border-color:transparent;}
-.slot-time{font-weight:700; font-variant-numeric:tabular-nums;}
-.slot-status{font-size:11px; color:var(--text-muted); margin-top:1px;}
-.slot-item button{font-size:11.5px; padding:5px 10px;}
+/* traditional day-view timeline (shared by scheduler + calendar tab) */
+.cal-timeline{border:1px solid var(--border); border-radius:10px; overflow:hidden; max-height:420px; overflow-y:auto; background:var(--surface);}
+.cal-row{display:grid; grid-template-columns:66px 1fr; border-top:1px solid var(--border);}
+.cal-row:first-child{border-top:none;}
+.cal-time{padding:12px 8px; font-size:11px; font-weight:700; color:var(--text-muted); text-align:right; border-right:1px solid var(--border); background:var(--surface-2); white-space:nowrap;}
+.cal-event-cell{padding:6px;}
+.cal-event{border-radius:8px; padding:9px 11px; min-height:34px; display:flex; align-items:center; justify-content:space-between; gap:8px; font-size:12.5px; border:1px solid transparent;}
+.cal-event.available{background:var(--success-soft);}
+.cal-event.blocked{background:var(--surface-2); opacity:.7;}
+.cal-event.closed{background:transparent; border:1px dashed var(--border); opacity:.55;}
+.cal-event.booked{background:var(--accent-soft); border-left:3px solid var(--accent-strong);}
+.cal-event.travel{background:var(--warning-soft); opacity:.9;}
+.cal-event-status{font-size:12px;}
+.cal-event button{font-size:11.5px; padding:5px 10px; flex:none;}
 
 .cal-controls{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;}
 .cal-controls .field{min-width:170px;}
@@ -491,7 +495,7 @@ $('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
 /* ================= DATA MAPPING ================= */
 function mapLead(r){
   return {
-    id:r.id, name:r.name, phone:r.phone, address:r.address, need:r.need, stage:r.stage,
+    id:r.id, name:r.name, phone:r.phone, address:r.address, county:r.county, csr:r.csr, need:r.need, stage:r.stage,
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
@@ -666,10 +670,11 @@ function openModal(){
 
   const nameF = el('input',{type:'text', id:'f-name', placeholder:'Customer name'}); nameF.value = lead?.name||'';
   const phoneF = el('input',{type:'tel', id:'f-phone', placeholder:'(214) 555-0100'}); phoneF.value = lead?.phone||'';
+  const csrF = el('input',{type:'text', id:'f-csr', placeholder:'Who took this call?'}); csrF.value = lead?.csr||'';
   const addrF = el('input',{type:'text', id:'f-addr', placeholder:'Street, city'}); addrF.value = lead?.address||'';
+  const countyF = el('input',{type:'text', id:'f-county', placeholder:'e.g. Tarrant'}); countyF.value = lead?.county||'';
   const needF = el('textarea',{id:'f-need', placeholder:'What do they need? Softener, filtration, testing...'}); needF.value = lead?.need||'';
   const windowF = el('input',{type:'text', id:'f-window', placeholder:'e.g. Thursday afternoon'}); windowF.value = lead?.requestedWindow||'';
-  const repF = el('input',{type:'text', id:'f-rep', placeholder:'Water specialist', list:'repList'}); repF.value = lead?.assignedRep||'';
   const repList = el('datalist',{id:'repList'}); REP_SUGGESTIONS.forEach(r=>repList.append(el('option',{value:r})));
   const stageF = el('select',{id:'f-stage'});
   STAGES.forEach(s=>stageF.append(el('option',{value:s.id, ...(s.id===(lead?.stage||'new')?{selected:'selected'}:{})}, s.label)));
@@ -686,9 +691,12 @@ function openModal(){
     el('div',{class:'field'}, el('label',{}, 'Name'), nameF),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Phone'), phoneF),
-      el('div',{class:'field'}, el('label',{}, 'Water specialist'), repF, repList)
+      el('div',{class:'field'}, el('label',{}, 'CSR'), csrF)
     ),
-    el('div',{class:'field'}, el('label',{}, 'Address'), addrF),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'Address'), addrF),
+      el('div',{class:'field'}, el('label',{}, 'County'), countyF)
+    ),
     el('div',{class:'field'}, el('label',{}, 'What they need'), needF),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Requested window'), windowF),
@@ -698,7 +706,8 @@ function openModal(){
       el('div',{}, el('div',{class:'lbl'}, 'Evening or Saturday ask'), el('div',{class:'sub'}, 'Outside the normal Mon–Fri 8–4 window')),
       el('label',{class:'switch'}, offToggle, el('span',{class:'track'}, el('span',{class:'thumb'})))
     ),
-    confirmRow
+    confirmRow,
+    repList
   );
 
   if(lead){
@@ -746,7 +755,8 @@ function openModal(){
 async function saveLead(existing){
   const data = {
     name: $('#f-name').value.trim(), phone: $('#f-phone').value.trim(), address: $('#f-addr').value.trim(),
-    need: $('#f-need').value.trim(), requested_window: $('#f-window').value.trim(), assigned_rep: $('#f-rep').value.trim(),
+    county: $('#f-county').value.trim(), csr: $('#f-csr').value.trim(),
+    need: $('#f-need').value.trim(), requested_window: $('#f-window').value.trim(),
     stage: $('#f-stage').value,
     off_hours: $('#f-offhours').checked, rep_confirmed: $('#f-confirmed').checked, updated_at: Date.now(),
   };
@@ -905,6 +915,78 @@ function populateRepDatalist(dl){
   dl.innerHTML = '';
   REP_SUGGESTIONS.forEach(r=>dl.append(el('option',{value:r})));
 }
+function slotToMinutes(s){ const [h,m] = s.split(':').map(Number); return h*60+m; }
+
+/* ---- drive-time engine: geocodes cities and estimates drive time so back-to-back
+   appointments aren't booked without room for the drive between them ---- */
+const REP_INHOME_MINUTES = { 'Chris Novotny': 60, 'Dylen Whitlock': 30 };
+function inHomeMinutesFor(rep){ return REP_INHOME_MINUTES[rep] ?? 60; }
+function cityFromAddress(addr){
+  if(!addr) return '';
+  const parts = addr.split(',');
+  return (parts.length>1 ? parts[parts.length-1] : addr).trim();
+}
+const geocodeCache = {};
+async function geocodeCity(place){
+  const key = (place||'').trim().toLowerCase();
+  if(!key) return null;
+  if(key in geocodeCache) return geocodeCache[key];
+  try{
+    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q='+encodeURIComponent(place+', Texas');
+    const resp = await fetch(url, {headers:{'Accept':'application/json'}});
+    const arr = await resp.json();
+    const result = (arr && arr[0]) ? {lat:parseFloat(arr[0].lat), lon:parseFloat(arr[0].lon)} : null;
+    geocodeCache[key] = result;
+    return result;
+  }catch(e){ console.error(e); geocodeCache[key] = null; return null; }
+}
+function haversineMiles(a,b){
+  const R = 3958.8, toRad = d=>d*Math.PI/180;
+  const dLat = toRad(b.lat-a.lat), dLon = toRad(b.lon-a.lon);
+  const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
+  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
+}
+async function estimateDriveMinutes(placeA, placeB){
+  if(!placeA || !placeB) return null;
+  if(placeA.trim().toLowerCase()===placeB.trim().toLowerCase()) return 10;
+  const [a,b] = await Promise.all([geocodeCity(placeA), geocodeCity(placeB)]);
+  if(!a || !b) return null;
+  const miles = haversineMiles(a,b) * 1.3; // road-distance fudge over straight-line
+  return Math.max(10, Math.round((miles/32*60)/5)*5); // ~32mph local-roads average, rounded to 5 min
+}
+// For a lead being scheduled, checks every open slot against the rep's other appointments
+// that day and flags any slot that doesn't leave enough drive time + in-home time on either side.
+async function computeTravelBlocks(rep, date, blocksMap, thisCity, inHomeMin){
+  const result = {};
+  if(!thisCity) return result;
+  const booked = SLOTS.filter(s=>blocksMap[s] && blocksMap[s].status==='booked').map(s=>{
+    const rec = blocksMap[s];
+    const leadObj = leads.find(l=>l.id===rec.leadId);
+    return { minutes: slotToMinutes(s), slot:s, city: leadObj ? cityFromAddress(leadObj.address) : '' };
+  }).sort((a,b)=>a.minutes-b.minutes);
+  if(booked.length===0) return result;
+  for(const slot of SLOTS){
+    if(blocksMap[slot]) continue; // already booked/blocked/open — not a travel candidate
+    const t = slotToMinutes(slot);
+    const prev = [...booked].reverse().find(b=>b.minutes < t);
+    const next = booked.find(b=>b.minutes > t);
+    let reason = null;
+    if(prev && prev.city){
+      const drive = await estimateDriveMinutes(prev.city, thisCity);
+      if(drive!=null && prev.minutes + inHomeMinutesFor(rep) + drive > t){
+        reason = 'Not enough drive time after the '+slotLabel(prev.slot)+' stop';
+      }
+    }
+    if(!reason && next && next.city){
+      const drive = await estimateDriveMinutes(thisCity, next.city);
+      if(drive!=null && t + inHomeMin + drive > next.minutes){
+        reason = 'Not enough drive time before the '+slotLabel(next.slot)+' stop';
+      }
+    }
+    if(reason) result[slot] = reason;
+  }
+  return result;
+}
 
 let activeBlocksQuery = null; // {rep,date,onChange}
 async function loadBlocksFor(rep, date, onChange){
@@ -917,13 +999,14 @@ async function loadBlocksFor(rep, date, onChange){
   onChange(map);
 }
 
-function renderSlotList(container, rep, date, blocksMap, mode, onBook){
+function renderSlotList(container, rep, date, blocksMap, mode, onBook, travelBlocks){
   container.innerHTML = '';
   if(!rep || !date){ container.append(el('div',{class:'empty-note'}, 'Pick a water specialist and a date')); return; }
   if(new Date(date+'T00:00:00').getDay()===0){
     container.append(el('div',{class:'empty-note'}, "Nation's Pure doesn't book Sundays")); return;
   }
-  const list = el('div',{class:'slot-list'});
+  travelBlocks = travelBlocks || {};
+  const grid = el('div',{class:'cal-timeline'});
   for(const slot of SLOTS){
     const rec = blocksMap[slot];
     let cls, statusText, action = null;
@@ -947,13 +1030,21 @@ function renderSlotList(container, rep, date, blocksMap, mode, onBook){
       cls = 'closed'; statusText = 'Not offered (evening/Saturday)';
       if(mode==='manage') action = el('button',{class:'btn', onclick:()=>openSlotFn(rep,date,slot)}, 'Open this time');
     }
-    const item = el('div',{class:'slot-item '+cls},
-      el('div',{}, el('div',{class:'slot-time'}, slotLabel(slot)), el('div',{class:'slot-status'}, statusText))
+    if(mode==='book' && travelBlocks[slot] && (cls==='available')){
+      cls = 'travel'; statusText = travelBlocks[slot]; action = null;
+    }
+    const row = el('div',{class:'cal-row'},
+      el('div',{class:'cal-time'}, slotLabel(slot)),
+      el('div',{class:'cal-event-cell'},
+        el('div',{class:'cal-event '+cls},
+          el('div',{class:'cal-event-status'}, statusText),
+          action
+        )
+      )
     );
-    if(action) item.append(action);
-    list.append(item);
+    grid.append(row);
   }
-  container.append(list);
+  container.append(grid);
 }
 
 async function blockSlot(rep,date,slot){
@@ -1000,8 +1091,17 @@ function buildSchedBox(lead){
   dateI.value = new Date().toISOString().slice(0,10);
   const slotsEl = el('div',{id:'sch-slots'});
   const refresh = ()=>{
-    loadBlocksFor(repI.value.trim(), dateI.value, map=>{
-      renderSlotList(slotsEl, repI.value.trim(), dateI.value, map, 'book', slot=>bookAppointment(lead, repI.value.trim(), dateI.value, slot));
+    const rep = repI.value.trim(), date = dateI.value;
+    const onBook = slot=>bookAppointment(lead, rep, date, slot);
+    loadBlocksFor(rep, date, async map=>{
+      renderSlotList(slotsEl, rep, date, map, 'book', onBook);
+      const city = cityFromAddress(lead.address);
+      if(rep && date && city){
+        const travel = await computeTravelBlocks(rep, date, map, city, inHomeMinutesFor(rep));
+        if(repI.value.trim()===rep && dateI.value===date){
+          renderSlotList(slotsEl, rep, date, map, 'book', onBook, travel);
+        }
+      }
     });
   };
   repI.addEventListener('input', refresh);

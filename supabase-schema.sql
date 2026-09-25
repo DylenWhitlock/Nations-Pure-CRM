@@ -9,6 +9,8 @@ create table if not exists leads (
   name text not null default '',
   phone text not null default '',
   address text not null default '',
+  county text not null default '',
+  csr text not null default '',
   need text not null default '',
   stage text not null default 'new',
   requested_window text not null default '',
