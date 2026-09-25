@@ -85,6 +85,16 @@ create policy "blocks_upsert" on blocks for insert with check (auth.role() = 'au
 create policy "blocks_update" on blocks for update using (auth.role() = 'authenticated');
 create policy "blocks_delete" on blocks for delete using (auth.role() = 'authenticated');
 
+-- ===== Table grants: RLS policies above only take effect once the authenticated
+-- role also has base table privileges. Without this, everything fails with
+-- "permission denied for table ..." even though the policies look right. =====
+
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on leads to authenticated;
+grant select, insert, delete on brochures to authenticated;
+grant select, insert on work_orders to authenticated;
+grant select, insert, update, delete on blocks to authenticated;
+
 -- ===== Live updates (so the board/calendar refresh across everyone's screen) =====
 
 alter publication supabase_realtime add table leads, brochures, work_orders, blocks;
