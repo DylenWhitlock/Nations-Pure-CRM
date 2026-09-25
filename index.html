@@ -243,6 +243,7 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 
 .cal-controls{display:flex; flex-wrap:wrap; gap:10px; margin-bottom:14px;}
 .cal-controls .field{min-width:170px;}
+.locked-field{background:var(--surface-2); color:var(--text-muted); cursor:not-allowed;}
 
 /* login */
 .login-screen{position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:16px; z-index:100;}
@@ -446,13 +447,27 @@ function onSignedIn(session){
   currentUser = {
     id: session.user.id, email: session.user.email,
     name: session.user.user_metadata?.name || (session.user.email||'').split('@')[0],
+    role: session.user.user_metadata?.role || 'manager',
   };
   $('#loginScreen').hidden = true;
   $('#appRoot').hidden = false;
   $('#userChip').textContent = currentUser.name;
   populateRepDatalist($('#repListCal'));
+  applyRoleView();
   fetchLeads(); fetchBrochures(); fetchWorkOrders();
   subscribeRealtime();
+}
+function applyRoleView(){
+  const isRep = currentUser.role === 'rep';
+  const calRepI = $('#calRep');
+  if(isRep){
+    calRepI.value = currentUser.name;
+    calRepI.readOnly = true;
+    calRepI.classList.add('locked-field');
+  } else {
+    calRepI.readOnly = false;
+    calRepI.classList.remove('locked-field');
+  }
 }
 function onSignedOut(){
   currentUser = null;
@@ -575,11 +590,17 @@ function matchesSearch(l){
 }
 function render(){ renderStats(); renderBoard(); }
 
+function visibleLeads(){
+  if(!currentUser || currentUser.role !== 'rep') return leads;
+  return leads.filter(l => l.assignedRep === currentUser.name || l.createdByName === currentUser.name);
+}
+
 function renderStats(){
   const row = $('#statsRow'); row.innerHTML = '';
-  const active = leads.filter(l=>l.stage!=='won' && l.stage!=='lost');
-  const needsConfirm = leads.filter(isOffHoursUnconfirmed).length;
-  const wonThisMonth = leads.filter(l=>{
+  const scoped = visibleLeads();
+  const active = scoped.filter(l=>l.stage!=='won' && l.stage!=='lost');
+  const needsConfirm = scoped.filter(isOffHoursUnconfirmed).length;
+  const wonThisMonth = scoped.filter(l=>{
     if(l.stage!=='won') return false;
     const d = new Date(l.updatedAt||l.createdAt||0), now = new Date();
     return d.getMonth()===now.getMonth() && d.getFullYear()===now.getFullYear();
@@ -596,7 +617,7 @@ function scrollToFirstUnconfirmed(){
 }
 function renderBoard(){
   const board = $('#board'); board.innerHTML = '';
-  const filtered = leads.filter(matchesSearch);
+  const filtered = visibleLeads().filter(matchesSearch);
   for(const stage of STAGES){
     let stageLeads = filtered.filter(l=>l.stage===stage.id);
     stageLeads.sort((a,b)=>{
@@ -1088,7 +1109,8 @@ function buildSchedBox(lead){
     return box;
   }
   const repI = el('input',{type:'text', id:'sch-rep', list:'repList', placeholder:'Water specialist'});
-  repI.value = lead.assignedRep || '';
+  repI.value = lead.assignedRep || (currentUser.role==='rep' ? currentUser.name : '');
+  if(currentUser.role==='rep'){ repI.readOnly = true; repI.classList.add('locked-field'); }
   const dateI = el('input',{type:'date', id:'sch-date'});
   dateI.value = new Date().toISOString().slice(0,10);
   const slotsEl = el('div',{id:'sch-slots'});
