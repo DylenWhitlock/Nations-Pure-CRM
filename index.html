@@ -207,7 +207,7 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 
 /* logo / brand */
 .brand-row{display:flex; align-items:center; gap:12px;}
-.brand-logo{height:46px; width:auto; display:block; flex:none;}
+.brand-logo{height:52px; width:auto; display:block; flex:none;}
 
 /* reviewed checkbox on new-lead cards */
 .reviewed-row{display:flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600; color:var(--text-muted); cursor:pointer;}
@@ -245,6 +245,18 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .cal-controls .field{min-width:170px;}
 .locked-field{background:var(--surface-2); color:var(--text-muted); cursor:not-allowed;}
 
+/* leaderboard */
+.lb-row{display:flex; align-items:center; gap:14px; padding:14px 4px; border-top:1px solid var(--border);}
+.lb-row:first-child{border-top:none;}
+.lb-rank{font-size:15px; font-weight:800; color:var(--text-muted); width:28px; flex:none;}
+.lb-main{flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;}
+.lb-name{font-weight:700; font-size:14px;}
+.lb-meter{height:6px; border-radius:99px; background:var(--surface-2); overflow:hidden;}
+.lb-meter-fill{height:100%; background:var(--accent); border-radius:99px; transition:width .3s ease;}
+.lb-sub{font-size:12px; color:var(--text-muted);}
+.lb-money{text-align:right; flex:none;}
+.lb-money-big{font-weight:800; font-size:15px; font-variant-numeric:tabular-nums;}
+
 /* login */
 .login-screen{position:fixed; inset:0; background:var(--bg); display:flex; align-items:center; justify-content:center; padding:16px; z-index:100;}
 .login-card{background:var(--surface); border:1px solid var(--border); border-radius:16px; padding:28px 24px; width:100%; max-width:360px; display:flex; flex-direction:column; gap:14px; box-shadow:var(--shadow);}
@@ -276,7 +288,6 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
         <img class="brand-logo" src="assets/nations-pure-logo.png" alt="Nation's Pure Water Systems">
         <div>
           <div class="name">Nation's Pure Leads</div>
-          <div class="tag">Call in → In-Home Visit → Quote → Won or Lost</div>
         </div>
       </div>
     </div>
@@ -300,6 +311,7 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
     <button class="tab active" id="tabLeads">Leads</button>
     <button class="tab" id="tabCal">Calendar</button>
     <button class="tab" id="tabDocs">Documents</button>
+    <button class="tab" id="tabAnalytics">Analytics</button>
   </div>
 
   <div id="leadsView">
@@ -352,6 +364,27 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
       <div class="brochure-grid" id="brochureGrid"></div>
     </div>
   </div>
+
+  <div id="analyticsView" hidden>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Team performance</h2>
+          <div class="panel-sub">Live — updates automatically as leads move and deals close</div>
+        </div>
+      </div>
+      <div class="stats-row" id="analyticsKpis"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Leaderboard</h2>
+          <div class="panel-sub">Ranked by deals won this month</div>
+        </div>
+      </div>
+      <div id="leaderboard"></div>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="overlay" hidden>
@@ -375,6 +408,19 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
     </div>
   </div>
 </div>
+
+<div class="sig-overlay" id="wonOverlay" hidden>
+  <div class="sig-box" style="width:min(360px,92vw);">
+    <h3>Mark this deal Won</h3>
+    <div class="field"><label>Sale price</label><input type="number" id="wonPrice" min="0" step="1" placeholder="4500"></div>
+    <div class="field"><label>System installed</label><input type="text" id="wonSystem" placeholder="e.g. Whole-home softener + RO"></div>
+    <div class="warn-note" id="wonError" hidden>Enter a valid sale price and the system installed</div>
+    <div class="sig-actions">
+      <button class="btn" id="wonCancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="wonConfirmBtn">Mark as Won</button>
+    </div>
+  </div>
+</div>
 </div><!-- /appRoot -->
 
 <div class="toast" id="toast"></div>
@@ -393,7 +439,8 @@ const STAGES = [
 const REP_SUGGESTIONS = ['Chris Novotny','Dylen Whitlock'];
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
-let currentUser = null; // {id, email, name}
+let currentUser = null; // {id, email, name, role}
+let pendingWonDetails = null;
 let realtimeChannel = null;
 
 let leads = [];
@@ -468,6 +515,8 @@ function applyRoleView(){
     calRepI.readOnly = false;
     calRepI.classList.remove('locked-field');
   }
+  $('#tabAnalytics').hidden = isRep;
+  if(isRep && state.view==='analytics') setView('leads');
 }
 function onSignedOut(){
   currentUser = null;
@@ -511,6 +560,7 @@ $('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
 function mapLead(r){
   return {
     id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, need:r.need, stage:r.stage,
+    salePrice:r.sale_price, systemName:r.system_name,
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
@@ -571,15 +621,19 @@ function setView(v){
   $('#tabLeads').classList.toggle('active', v==='leads');
   $('#tabDocs').classList.toggle('active', v==='documents');
   $('#tabCal').classList.toggle('active', v==='calendar');
+  $('#tabAnalytics').classList.toggle('active', v==='analytics');
   $('#leadsView').hidden = v!=='leads';
   $('#leadsControls').style.visibility = v==='leads' ? 'visible' : 'hidden';
   $('#documentsView').hidden = v!=='documents';
   $('#calendarView').hidden = v!=='calendar';
+  $('#analyticsView').hidden = v!=='analytics';
   if(v==='calendar'){ populateRepDatalist($('#repListCal')); renderCalendarTab(); }
+  if(v==='analytics'){ renderAnalytics(); }
 }
 $('#tabLeads').addEventListener('click', ()=>setView('leads'));
 $('#tabDocs').addEventListener('click', ()=>setView('documents'));
 $('#tabCal').addEventListener('click', ()=>setView('calendar'));
+$('#tabAnalytics').addEventListener('click', ()=>setView('analytics'));
 
 /* ---------- leads board ---------- */
 function isOffHoursUnconfirmed(l){ return !!l.offHours && !l.repConfirmed && l.stage!=='won' && l.stage!=='lost'; }
@@ -588,7 +642,7 @@ function matchesSearch(l){
   const q = state.search.toLowerCase();
   return (l.name||'').toLowerCase().includes(q) || (l.phone||'').toLowerCase().includes(q) || (l.email||'').toLowerCase().includes(q);
 }
-function render(){ renderStats(); renderBoard(); }
+function render(){ renderStats(); renderBoard(); if(state.view==='analytics') renderAnalytics(); }
 
 function visibleLeads(){
   if(!currentUser || currentUser.role !== 'rep') return leads;
@@ -610,6 +664,59 @@ function renderStats(){
   if(needsConfirm>0){
     row.append(el('div',{class:'chip warn', onclick:()=>{ state.search=''; $('#searchInput').value=''; scrollToFirstUnconfirmed(); }}, needsConfirm+' need rep confirmation'));
   }
+}
+function fmtMoney(n){
+  if(n==null || isNaN(n)) return '$0';
+  return '$'+Math.round(n).toLocaleString('en-US');
+}
+function renderAnalytics(){
+  if(!currentUser || currentUser.role==='rep') return;
+  const roster = Array.from(new Set([...REP_SUGGESTIONS, ...leads.map(l=>l.assignedRep).filter(Boolean)]));
+  const rows = roster.map(rep=>{
+    const mine = leads.filter(l=>l.assignedRep===rep);
+    const appts = mine.filter(l=>l.apptDate).length;
+    const won = mine.filter(l=>l.stage==='won');
+    const totalRevenue = won.reduce((sum,l)=>sum+(Number(l.salePrice)||0),0);
+    const conversion = appts>0 ? (won.length/appts*100) : 0;
+    const avgSale = won.length>0 ? totalRevenue/won.length : 0;
+    return { rep, appts, wonCount:won.length, conversion, avgSale, totalRevenue };
+  }).sort((a,b)=> b.wonCount-a.wonCount || b.totalRevenue-a.totalRevenue);
+
+  const totalAppts = rows.reduce((s,r)=>s+r.appts,0);
+  const totalWon = rows.reduce((s,r)=>s+r.wonCount,0);
+  const totalRevenue = rows.reduce((s,r)=>s+r.totalRevenue,0);
+  const overallConv = totalAppts>0 ? (totalWon/totalAppts*100) : 0;
+  const overallAvg = totalWon>0 ? totalRevenue/totalWon : 0;
+
+  const kpis = $('#analyticsKpis'); kpis.innerHTML = '';
+  kpis.append(
+    el('div',{class:'chip'}, totalAppts+' appointments'),
+    el('div',{class:'chip'}, totalWon+' deals won'),
+    el('div',{class:'chip'}, overallConv.toFixed(0)+'% appt → sale'),
+    el('div',{class:'chip'}, fmtMoney(overallAvg)+' avg sale'),
+    el('div',{class:'chip'}, fmtMoney(totalRevenue)+' total revenue'),
+  );
+
+  const board = $('#leaderboard'); board.innerHTML = '';
+  if(rows.every(r=>r.appts===0 && r.wonCount===0)){
+    board.append(el('div',{class:'col-empty'}, 'No appointments or deals recorded yet'));
+    return;
+  }
+  rows.forEach((r,i)=>{
+    const pct = Math.max(0, Math.min(100, r.conversion));
+    board.append(el('div',{class:'lb-row'},
+      el('div',{class:'lb-rank'}, '#'+(i+1)),
+      el('div',{class:'lb-main'},
+        el('div',{class:'lb-name'}, r.rep),
+        el('div',{class:'lb-meter'}, el('div',{class:'lb-meter-fill', style:'width:'+pct+'%;'})),
+        el('div',{class:'lb-sub'}, r.wonCount+' won · '+r.appts+' appts · '+r.conversion.toFixed(0)+'% conversion')
+      ),
+      el('div',{class:'lb-money'},
+        el('div',{class:'lb-money-big'}, fmtMoney(r.totalRevenue)),
+        el('div',{class:'lb-sub'}, fmtMoney(r.avgSale)+' avg sale')
+      )
+    ));
+  });
 }
 function scrollToFirstUnconfirmed(){
   const card = document.querySelector('[data-unconfirmed="1"]');
@@ -657,7 +764,7 @@ function renderCard(lead){
     cb.checked = !!lead.reviewed;
     card.append(el('label',{class:'reviewed-row', onclick:e=>e.stopPropagation()}, cb, 'Reviewed'));
   }
-  const sel = el('select',{onclick:e=>e.stopPropagation(), onchange:e=>changeStage(lead, e.target.value)});
+  const sel = el('select',{onclick:e=>e.stopPropagation(), onchange:e=>changeStage(lead, e.target.value, sel)});
   for(const s of STAGES){ sel.append(el('option',{value:s.id, ...(s.id===lead.stage?{selected:'selected'}:{})}, s.label)); }
   card.append(sel);
   return card;
@@ -666,7 +773,34 @@ async function toggleReviewed(lead, val){
   const { error } = await sb.from('leads').update({ reviewed: val, updated_at: Date.now() }).eq('id', lead.id);
   if(error) showToast("Couldn't update that");
 }
-async function changeStage(lead, newStage){
+/* ---- "Won" requires a sale price + system before it commits ---- */
+function askWonDetails(defaults){
+  return new Promise(resolve=>{
+    const priceI = $('#wonPrice'), systemI = $('#wonSystem'), err = $('#wonError');
+    priceI.value = (defaults && defaults.salePrice!=null) ? defaults.salePrice : '';
+    systemI.value = (defaults && defaults.systemName) || '';
+    err.hidden = true;
+    $('#wonOverlay').hidden = false;
+    setTimeout(()=>priceI.focus(), 50);
+    const confirmBtn = $('#wonConfirmBtn'), cancelBtn = $('#wonCancelBtn');
+    const cleanup = ()=>{ $('#wonOverlay').hidden = true; confirmBtn.onclick = null; cancelBtn.onclick = null; };
+    confirmBtn.onclick = ()=>{
+      const price = parseFloat(priceI.value);
+      const system = systemI.value.trim();
+      if(!priceI.value.trim() || isNaN(price) || price<=0 || !system){ err.hidden = false; return; }
+      cleanup(); resolve({ salePrice: price, systemName: system });
+    };
+    cancelBtn.onclick = ()=>{ cleanup(); resolve(null); };
+  });
+}
+async function changeStage(lead, newStage, selectEl){
+  if(newStage==='won'){
+    const details = await askWonDetails({ salePrice: lead.salePrice, systemName: lead.systemName });
+    if(!details){ if(selectEl) selectEl.value = lead.stage; return; }
+    const { error } = await sb.from('leads').update({ stage:'won', sale_price: details.salePrice, system_name: details.systemName, updated_at: Date.now() }).eq('id', lead.id);
+    if(error){ showToast("Couldn't move that lead"); if(selectEl) selectEl.value = lead.stage; }
+    return;
+  }
   const { error } = await sb.from('leads').update({ stage:newStage, updated_at: Date.now() }).eq('id', lead.id);
   if(error){ showToast("Couldn't move that lead"); render(); }
 }
@@ -700,6 +834,16 @@ function openModal(){
   const repList = el('datalist',{id:'repList'}); REP_SUGGESTIONS.forEach(r=>repList.append(el('option',{value:r})));
   const stageF = el('select',{id:'f-stage'});
   STAGES.forEach(s=>stageF.append(el('option',{value:s.id, ...(s.id===(lead?.stage||'new')?{selected:'selected'}:{})}, s.label)));
+  pendingWonDetails = null;
+  stageF.addEventListener('change', async ()=>{
+    if(stageF.value==='won'){
+      const details = await askWonDetails({ salePrice: lead?.salePrice, systemName: lead?.systemName });
+      if(!details){ stageF.value = lead?.stage || 'new'; pendingWonDetails = null; return; }
+      pendingWonDetails = details;
+    } else {
+      pendingWonDetails = null;
+    }
+  });
 
   const offToggle = el('input',{type:'checkbox', id:'f-offhours'}); offToggle.checked = !!lead?.offHours;
   const confirmToggle = el('input',{type:'checkbox', id:'f-confirmed'}); confirmToggle.checked = !!lead?.repConfirmed;
@@ -784,6 +928,18 @@ async function saveLead(existing){
     off_hours: $('#f-offhours').checked, rep_confirmed: $('#f-confirmed').checked, updated_at: Date.now(),
   };
   if(!data.name){ showToast('Add a name first'); return; }
+  if(data.stage==='won'){
+    if(pendingWonDetails){
+      data.sale_price = pendingWonDetails.salePrice; data.system_name = pendingWonDetails.systemName;
+    } else if(existing && existing.stage==='won'){
+      // stage wasn't actually changed this save — keep whatever price/system the deal already has
+      if(existing.salePrice!=null) data.sale_price = existing.salePrice;
+      if(existing.systemName) data.system_name = existing.systemName;
+    } else {
+      showToast('Enter the sale price and system before marking this Won'); return;
+    }
+  }
+  pendingWonDetails = null;
   try{
     if(existing){
       const { error } = await sb.from('leads').update(data).eq('id', existing.id);

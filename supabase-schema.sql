@@ -19,6 +19,8 @@ create table if not exists leads (
   rep_confirmed boolean not null default false,
   assigned_rep text not null default '',
   reviewed boolean not null default false,
+  sale_price numeric,
+  system_name text not null default '',
   appt_date text not null default '',
   appt_start text not null default '',
   note_log jsonb not null default '[]'::jsonb,
