@@ -798,11 +798,15 @@ async function changeStage(lead, newStage, selectEl){
     const details = await askWonDetails({ salePrice: lead.salePrice, systemName: lead.systemName });
     if(!details){ if(selectEl) selectEl.value = lead.stage; return; }
     const { error } = await sb.from('leads').update({ stage:'won', sale_price: details.salePrice, system_name: details.systemName, updated_at: Date.now() }).eq('id', lead.id);
-    if(error){ showToast("Couldn't move that lead"); if(selectEl) selectEl.value = lead.stage; }
+    if(error){ showToast("Couldn't move that lead"); if(selectEl) selectEl.value = lead.stage; return; }
+    lead.stage = 'won'; lead.salePrice = details.salePrice; lead.systemName = details.systemName; lead.updatedAt = Date.now();
+    render();
     return;
   }
   const { error } = await sb.from('leads').update({ stage:newStage, updated_at: Date.now() }).eq('id', lead.id);
-  if(error){ showToast("Couldn't move that lead"); render(); }
+  if(error){ showToast("Couldn't move that lead"); render(); return; }
+  lead.stage = newStage; lead.updatedAt = Date.now();
+  render();
 }
 function openAdd(){ state.adding = true; state.editingId = null; openModal(); }
 function openEdit(id){ state.adding = false; state.editingId = id; openModal(); }
@@ -944,6 +948,16 @@ async function saveLead(existing){
     if(existing){
       const { error } = await sb.from('leads').update(data).eq('id', existing.id);
       if(error) throw error;
+      // patch the in-memory copy immediately rather than waiting on the realtime
+      // round-trip, so a stage change (esp. into Won) can't appear to "revert"
+      Object.assign(existing, {
+        name:data.name, phone:data.phone, email:data.email, address:data.address, county:data.county, csr:data.csr,
+        need:data.need, requestedWindow:data.requested_window, stage:data.stage,
+        offHours:data.off_hours, repConfirmed:data.rep_confirmed, updatedAt:data.updated_at,
+        ...(data.sale_price!=null ? {salePrice:data.sale_price} : {}),
+        ...(data.system_name!=null ? {systemName:data.system_name} : {}),
+      });
+      render();
     } else {
       const noteTxt = $('#f-newnote')?.value.trim();
       data.note_log = noteTxt ? [{text:noteTxt, by:currentUser.id, byName:currentUser.name, at:Date.now()}] : [];
@@ -1308,8 +1322,10 @@ async function bookAppointment(lead, rep, date, slot){
     if(lead.stage==='new') upd.stage = 'scheduled';
     const { error: e2 } = await sb.from('leads').update(upd).eq('id', lead.id);
     if(e2) throw e2;
+    lead.assignedRep = rep; lead.apptDate = date; lead.apptStart = slot; lead.updatedAt = upd.updated_at;
+    if(upd.stage) lead.stage = upd.stage;
     showToast('Appointment booked');
-    openModal();
+    render(); openModal();
   }catch(err){ console.error(err); showToast("Couldn't book that appointment"); }
 }
 async function clearAppointment(lead){
@@ -1319,7 +1335,8 @@ async function clearAppointment(lead){
     }
     const { error } = await sb.from('leads').update({ appt_date:'', appt_start:'', updated_at:Date.now() }).eq('id', lead.id);
     if(error) throw error;
-    openModal();
+    lead.apptDate = ''; lead.apptStart = ''; lead.updatedAt = Date.now();
+    render(); openModal();
   }catch(err){ showToast("Couldn't change that appointment"); }
 }
 
@@ -1389,7 +1406,7 @@ function openWorkOrder(lead){
   wo = {
     leadId: lead ? lead.id : null,
     values: { name: lead?.name||'', address: lead?.address||'', cell1: lead?.phone||'' },
-    placements: [], pendingSig: null, busy: false,
+    placements: [], pendingSig: null, lastSig: null, busy: false,
   };
   closeModal();
   $('#woOverlay').hidden = false;
@@ -1431,11 +1448,20 @@ function renderWo(){
   }
 
   const sigFs = el('fieldset',{class:'wo-fieldset'}, el('legend',{}, 'Signatures'));
+  let sigMsg;
+  if(wo.pendingSig) sigMsg = 'Tap the spot on the form below where this signature goes.';
+  else if(wo.lastSig) sigMsg = 'Applied to all 3 customer signature lines. Redraw to replace it everywhere, or add it somewhere else too.';
+  else sigMsg = 'Draw a signature once — it\'s applied to all 3 customer signature lines automatically.';
   sigFs.append(el('div',{class:'sig-instructions'},
     el('svg',{width:'15',height:'15',viewBox:'0 0 24 24',fill:'none',stroke:'currentColor','stroke-width':'2.4', html:'<circle cx="12" cy="12" r="9"/><path d="M12 8v5M12 16h.01"/>'}),
-    wo.pendingSig ? 'Tap the spot on the form below where this signature goes.' : 'Draw a signature, then tap where it goes on the pages below.'
+    sigMsg
   ));
-  sigFs.append(el('button',{class:'btn', onclick:openSigPad}, wo.pendingSig ? 'Redraw signature' : '+ Draw a signature'));
+  const sigBtnRow = el('div',{style:'display:flex; gap:8px; flex-wrap:wrap;'});
+  sigBtnRow.append(el('button',{class:'btn', onclick:openSigPad}, wo.lastSig ? 'Redraw signature' : '+ Draw a signature'));
+  if(wo.lastSig){
+    sigBtnRow.append(el('button',{class:'btn', onclick:()=>{ wo.pendingSig = wo.lastSig; renderWo(); }}, '+ Place it somewhere else'));
+  }
+  sigFs.append(sigBtnRow);
   PAGE_IMGS.forEach((src, idx)=>{
     const wrap = el('div',{class:'wo-page-wrap'});
     const img = el('img',{src, alt:'Work order page '+(idx+1), onclick:(e)=>pageClick(e, idx)});
@@ -1464,18 +1490,35 @@ function renderWo(){
   shell.append(bar);
 }
 
+/* the fixed spot of the "Customer ____" signature line on each of the 3
+   work-order pages, measured in page-image pixels (1275x1650) — used to
+   auto-place a drawn signature on all 3 without the user tapping each one */
+const SIGNATURE_SLOTS = [
+  { pageIndex:0, xPx:379, yPx:1322 },
+  { pageIndex:1, xPx:516, yPx:967 },
+  { pageIndex:2, xPx:516, yPx:933 },
+];
+function placementFor(pageIndex, xPx, yPx, dataUrl, auto){
+  const stampWPt = 130, stampHPt = 130*(200/600);
+  const xPdfCenter = xPx*PT_PER_PX, yPdfCenter = PAGE_PT.h - yPx*PT_PER_PX;
+  return {
+    pageIndex, dataUrl,
+    x: xPdfCenter - stampWPt/2, y: yPdfCenter - stampHPt/2, w: stampWPt, h: stampHPt,
+    leftPct: xPx/PAGE_PX.w*100, topPct: yPx/PAGE_PX.h*100, wPct: (stampWPt/PT_PER_PX)/PAGE_PX.w*100,
+    auto: !!auto,
+  };
+}
+function applySignatureToSlots(dataUrl){
+  wo.placements = wo.placements.filter(p=>!p.auto);
+  SIGNATURE_SLOTS.forEach(s=>wo.placements.push(placementFor(s.pageIndex, s.xPx, s.yPx, dataUrl, true)));
+  wo.lastSig = dataUrl;
+}
 function pageClick(e, pageIndex){
   if(!wo.pendingSig){ showToast('Draw a signature first'); return; }
   const rect = e.currentTarget.getBoundingClientRect();
   const xPx = (e.clientX-rect.left)/rect.width*PAGE_PX.w;
   const yPx = (e.clientY-rect.top)/rect.height*PAGE_PX.h;
-  const stampWPt = 130, stampHPt = 130*(200/600);
-  const xPdfCenter = xPx*PT_PER_PX, yPdfCenter = PAGE_PT.h - yPx*PT_PER_PX;
-  wo.placements.push({
-    pageIndex, dataUrl: wo.pendingSig,
-    x: xPdfCenter - stampWPt/2, y: yPdfCenter - stampHPt/2, w: stampWPt, h: stampHPt,
-    leftPct: xPx/PAGE_PX.w*100, topPct: yPx/PAGE_PX.h*100, wPct: (stampWPt/PT_PER_PX)/PAGE_PX.w*100,
-  });
+  wo.placements.push(placementFor(pageIndex, xPx, yPx, wo.pendingSig, false));
   wo.pendingSig = null;
   renderWo();
 }
@@ -1517,8 +1560,12 @@ $('#sigClearBtn').addEventListener('click', ()=>{
 $('#sigCancelBtn').addEventListener('click', ()=>{ $('#sigOverlay').hidden = true; });
 $('#sigDoneBtn').addEventListener('click', ()=>{
   if(!sigHasDrawn){ showToast('Draw a signature first'); return; }
-  wo.pendingSig = $('#sigCanvas').toDataURL('image/png');
+  const dataUrl = $('#sigCanvas').toDataURL('image/png');
+  const wasRedraw = !!wo.lastSig;
+  applySignatureToSlots(dataUrl);
+  wo.pendingSig = null;
   $('#sigOverlay').hidden = true;
+  showToast(wasRedraw ? 'Signature replaced on all 3 pages' : 'Signature applied to all 3 customer lines');
   renderWo();
 });
 
