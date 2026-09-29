@@ -43,6 +43,32 @@ By default Supabase lets anyone sign themselves up — turn that off so only you
    your domain is managed (GoDaddy, Squarespace, etc.) — usually a CNAME record. Once
    that propagates (minutes to a few hours), your domain points straight at the CRM.
 
+## 4. Text alerts on new leads (optional, ~10 min)
+
+When someone adds a new lead, the CRM can text a set of phone numbers automatically
+(name, phone, need, address). This runs through Twilio — a standard texting service —
+so your Twilio credentials never sit in the website's code, only in Vercel's private
+environment variables.
+
+1. Go to twilio.com and sign up (free to start; no card needed to explore the console).
+2. On the Twilio Console home page, copy your **Account SID** and **Auth Token**.
+3. Get a Twilio phone number: **Phone Numbers → Buy a number** (pick one with SMS
+   capability — a local DFW area code works fine). This costs about $1/month, plus
+   roughly a penny per text sent.
+4. In Vercel, open this project → **Settings → Environment Variables** and add:
+   - `TWILIO_ACCOUNT_SID` — from step 2
+   - `TWILIO_AUTH_TOKEN` — from step 2
+   - `TWILIO_FROM_NUMBER` — your Twilio number from step 3, in the form `+12145551234`
+   - `NOTIFY_PHONE_NUMBERS` — the numbers to text, comma-separated, e.g.
+     `+12145551234,+18175559876`
+   - `SUPABASE_URL` — same value as in `config.js`
+   - `SUPABASE_ANON_KEY` — same value as in `config.js`
+5. Redeploy (Vercel → Deployments → ⋯ → Redeploy) so the new environment variables
+   take effect.
+
+Until these are set, adding a lead works exactly as before — it just quietly skips
+the text.
+
 ## After setup: making changes
 
 Send me what you want changed, same as always. If this is connected to GitHub, I update

@@ -964,10 +964,27 @@ async function saveLead(existing){
       data.created_at = Date.now(); data.created_by = currentUser.id; data.created_by_name = currentUser.name;
       const { error } = await sb.from('leads').insert(data);
       if(error) throw error;
+      notifyNewLead(data);
     }
     closeModal();
     showToast(existing ? 'Saved' : 'Lead added');
   }catch(err){ console.error(err); showToast("Couldn't save that lead"); }
+}
+/* fire-and-forget text alert to the team — never blocks or fails the save */
+async function notifyNewLead(data){
+  try{
+    const { data: sess } = await sb.auth.getSession();
+    const token = sess?.session?.access_token;
+    if(!token) return;
+    await fetch('/api/notify-lead', {
+      method:'POST',
+      headers:{ 'Content-Type':'application/json', Authorization:'Bearer '+token },
+      body: JSON.stringify({
+        name:data.name, phone:data.phone, need:data.need, address:data.address, county:data.county,
+        addedBy: currentUser?.name||'',
+      }),
+    });
+  }catch(e){ console.error('lead text alert failed', e); }
 }
 async function addNote(lead){
   const ta = $('#f-newnote');
