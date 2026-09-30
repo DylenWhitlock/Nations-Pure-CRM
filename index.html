@@ -263,7 +263,39 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .login-card .brand-row{justify-content:center; margin-bottom:4px;}
 .login-card h2{font-size:17px; font-weight:800; text-align:center;}
 .user-chip-wrap{display:flex; align-items:center; gap:8px;}
-.user-chip{font-size:12.5px; font-weight:600; color:var(--text-muted);}
+.user-chip{font-size:12.5px; font-weight:600; color:var(--text-muted); background:none; border:1px solid transparent; border-radius:999px; padding:7px 12px; cursor:pointer; font-family:inherit; display:inline-flex; align-items:center; gap:6px;}
+.user-chip:hover, .user-chip.active{border-color:var(--accent); color:var(--accent-strong); background:var(--accent-soft);}
+
+/* communications */
+.comm-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:12px;}
+.comm-card{border:1px solid var(--border); border-radius:12px; padding:14px; background:var(--bg); display:flex; flex-direction:column; gap:10px;}
+.comm-card h3{font-size:14px; font-weight:800;}
+.comm-desc{font-size:12px; color:var(--text-muted); margin-top:2px; line-height:1.4;}
+.comm-auto{font-size:12px; font-weight:600; color:var(--accent-strong); background:var(--accent-soft); border-radius:9px; padding:8px 10px;}
+.comm-list{display:flex; flex-direction:column; gap:6px;}
+.comm-row{display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:9px; background:var(--surface); border:1px solid var(--border);}
+.comm-row.off{opacity:.55;}
+.comm-who{flex:1; min-width:0;}
+.comm-name{font-size:13px; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.comm-phone{font-size:11.5px; color:var(--text-muted); font-variant-numeric:tabular-nums;}
+.comm-x{border:none; background:none; color:var(--text-muted); cursor:pointer; padding:4px; border-radius:6px; display:flex;}
+.comm-x:hover{color:var(--danger); background:var(--danger-soft);}
+.comm-add{display:grid; grid-template-columns:1fr 1fr auto; gap:6px; align-items:end;}
+.comm-add input{border:1px solid var(--border); border-radius:9px; padding:8px 10px; font-size:13px; font-family:inherit; background:var(--surface); color:var(--text); width:100%; min-width:0;}
+.comm-add .btn{padding:8px 12px;}
+.comm-foot{display:flex; justify-content:flex-end; margin-top:auto;}
+.rep-row{display:grid; grid-template-columns:minmax(120px,1fr) minmax(140px,1fr) auto; gap:8px; align-items:center; padding:8px 0; border-top:1px solid var(--border);}
+.rep-row:first-child{border-top:none;}
+.rep-row .rep-name{font-size:13px; font-weight:700;}
+.rep-row input{border:1px solid var(--border); border-radius:9px; padding:8px 10px; font-size:13px; font-family:inherit; background:var(--bg); color:var(--text); width:100%; min-width:0;}
+.log-row{display:flex; gap:10px; align-items:flex-start; padding:9px 0; border-top:1px solid var(--border); font-size:12.5px;}
+.log-row:first-child{border-top:none;}
+.log-dot{width:8px; height:8px; border-radius:50%; margin-top:5px; flex:none; background:var(--success);}
+.log-dot.bad{background:var(--danger);}
+.log-body{flex:1; min-width:0; white-space:pre-line; line-height:1.4;}
+.log-meta{font-size:11px; color:var(--text-muted); margin-top:3px;}
+.log-err{font-size:11.5px; color:var(--danger); margin-top:3px;}
+@media (max-width:520px){ .comm-add{grid-template-columns:1fr 1fr;} .comm-add .btn{grid-column:1 / -1; justify-content:center;} .rep-row{grid-template-columns:1fr auto;} .rep-row .rep-name{grid-column:1 / -1;} }
 </style>
 </head>
 <body>
@@ -301,7 +333,7 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
         New lead
       </button>
       <div class="user-chip-wrap">
-        <span class="user-chip" id="userChip"></span>
+        <button class="user-chip" id="userChip" title="My profile & communications"></button>
         <button class="btn btn-ghost" id="signOutBtn">Sign out</button>
       </div>
     </div>
@@ -362,6 +394,40 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
       </div>
       <div class="upload-row" id="brochureUploadRow"></div>
       <div class="brochure-grid" id="brochureGrid"></div>
+    </div>
+  </div>
+
+  <div id="profileView" hidden>
+    <div class="panel" id="commPanel">
+      <div class="panel-head">
+        <div>
+          <h2>Communications</h2>
+          <div class="panel-sub">Who gets a text from (844) 426-4089 when things happen in the CRM</div>
+        </div>
+      </div>
+      <div class="comm-grid" id="commGrid"></div>
+    </div>
+    <div class="panel" id="repPhonePanel">
+      <div class="panel-head">
+        <div>
+          <h2>Rep cell numbers</h2>
+          <div class="panel-sub">The assigned water specialist is texted automatically — the name must match the one used on leads</div>
+        </div>
+      </div>
+      <div id="repPhoneList"></div>
+    </div>
+    <div class="panel" id="textLogPanel">
+      <div class="panel-head">
+        <div>
+          <h2>Recent texts</h2>
+          <div class="panel-sub">Last 20 texts the CRM sent or tried to send</div>
+        </div>
+        <button class="btn" id="refreshLogBtn">Refresh</button>
+      </div>
+      <div id="textLog"></div>
+    </div>
+    <div class="panel" id="repProfileNote" hidden>
+      <div class="panel-head"><div><h2>Text notifications</h2><div class="panel-sub">You'll get a text when a lead or appointment is assigned to you. Ask Dylen to update your cell number if it changes.</div></div></div>
     </div>
   </div>
 
@@ -498,7 +564,8 @@ function onSignedIn(session){
   };
   $('#loginScreen').hidden = true;
   $('#appRoot').hidden = false;
-  $('#userChip').textContent = currentUser.name;
+  $('#userChip').innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6"/></svg>';
+  $('#userChip').append(currentUser.name);
   populateRepDatalist($('#repListCal'));
   applyRoleView();
   fetchLeads(); fetchBrochures(); fetchWorkOrders();
@@ -531,6 +598,8 @@ function subscribeRealtime(){
     .on('postgres_changes', {event:'*', schema:'public', table:'leads'}, ()=>fetchLeads())
     .on('postgres_changes', {event:'*', schema:'public', table:'brochures'}, ()=>fetchBrochures())
     .on('postgres_changes', {event:'*', schema:'public', table:'work_orders'}, ()=>fetchWorkOrders())
+    .on('postgres_changes', {event:'*', schema:'public', table:'notify_recipients'}, ()=>{ if(state.view==='profile') fetchComms(); })
+    .on('postgres_changes', {event:'*', schema:'public', table:'rep_phones'}, ()=>{ if(state.view==='profile') fetchComms(); })
     .on('postgres_changes', {event:'*', schema:'public', table:'blocks'}, ()=>{
       if(activeBlocksQuery) loadBlocksFor(activeBlocksQuery.rep, activeBlocksQuery.date, activeBlocksQuery.onChange);
     })
@@ -622,14 +691,19 @@ function setView(v){
   $('#tabDocs').classList.toggle('active', v==='documents');
   $('#tabCal').classList.toggle('active', v==='calendar');
   $('#tabAnalytics').classList.toggle('active', v==='analytics');
+  $('#userChip').classList.toggle('active', v==='profile');
   $('#leadsView').hidden = v!=='leads';
-  $('#leadsControls').style.visibility = v==='leads' ? 'visible' : 'hidden';
+  $('#leadsControls .search').style.visibility = v==='leads' ? 'visible' : 'hidden';
+  $('#newLeadBtn').style.visibility = v==='leads' ? 'visible' : 'hidden';
+  $('#profileView').hidden = v!=='profile';
   $('#documentsView').hidden = v!=='documents';
   $('#calendarView').hidden = v!=='calendar';
   $('#analyticsView').hidden = v!=='analytics';
   if(v==='calendar'){ populateRepDatalist($('#repListCal')); renderCalendarTab(); }
   if(v==='analytics'){ renderAnalytics(); }
+  if(v==='profile'){ openProfile(); }
 }
+$('#userChip').addEventListener('click', ()=>setView('profile'));
 $('#tabLeads').addEventListener('click', ()=>setView('leads'));
 $('#tabDocs').addEventListener('click', ()=>setView('documents'));
 $('#tabCal').addEventListener('click', ()=>setView('calendar'));
@@ -1643,6 +1717,159 @@ async function finishWorkOrder(){
     wo.busy = false; renderWo();
   }
 }
+
+/* ================= PROFILE → COMMUNICATIONS ================= */
+const COMM_TRIGGERS = [
+  {id:'new_lead', title:'New lead', desc:'Texted the moment a new lead is added.'},
+  {id:'rep_assigned', title:'Rep assigned', desc:'The assigned water specialist is texted automatically. Anyone below also gets a copy.', auto:true},
+  {id:'won', title:'Deal won', desc:'Texted when a deal is marked Won, with the system and sale price.'},
+];
+let comm = { recipients:[], repPhones:[], log:[] };
+function phoneDigits(s){ return (s||'').replace(/\D/g,''); }
+function validPhone(s){ const d = phoneDigits(s); return d.length===10 || (d.length===11 && d[0]==='1'); }
+function fmtPhone(s){
+  let d = phoneDigits(s); if(d.length===11 && d[0]==='1') d = d.slice(1);
+  return d.length===10 ? '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6) : (s||'');
+}
+function isManager(){ return currentUser && currentUser.role !== 'rep'; }
+
+function openProfile(){
+  const mgr = isManager();
+  $('#commPanel').hidden = !mgr;
+  $('#repPhonePanel').hidden = !mgr;
+  $('#textLogPanel').hidden = !mgr;
+  $('#repProfileNote').hidden = mgr;
+  if(mgr) fetchComms();
+}
+async function fetchComms(){
+  const [r, p, l] = await Promise.all([
+    sb.from('notify_recipients').select('*').order('created_at',{ascending:true}),
+    sb.from('rep_phones').select('*'),
+    sb.from('text_log').select('*').order('created_at',{ascending:false}).limit(20),
+  ]);
+  if(r.error || p.error){
+    console.error(r.error||p.error);
+    $('#commGrid').innerHTML = '';
+    $('#commGrid').append(el('div',{class:'warn-note'}, "Texting isn't set up in the database yet — run texting.sql in Supabase."));
+    return;
+  }
+  comm.recipients = r.data||[]; comm.repPhones = p.data||[]; comm.log = l.data||[];
+  renderComms();
+}
+function renderComms(){ renderCommGrid(); renderRepPhones(); renderTextLog(); }
+
+function renderCommGrid(){
+  const grid = $('#commGrid'); grid.innerHTML = '';
+  for(const t of COMM_TRIGGERS){
+    const people = comm.recipients.filter(x=>x.trigger_type===t.id);
+    const card = el('div',{class:'comm-card'});
+    card.append(el('div',{}, el('h3',{}, t.title), el('div',{class:'comm-desc'}, t.desc)));
+    if(t.auto) card.append(el('div',{class:'comm-auto'}, '✓ Assigned rep — automatic'));
+    const list = el('div',{class:'comm-list'});
+    if(people.length===0) list.append(el('div',{class:'empty-note', style:'padding:4px 2px;'}, t.auto ? 'No extra people' : 'No one yet — add someone below'));
+    for(const person of people){
+      const tog = el('input',{type:'checkbox', 'aria-label':'Texts on for '+person.name, onchange:e=>toggleRecipient(person, e.target.checked)});
+      tog.checked = !!person.active;
+      list.append(el('div',{class:'comm-row'+(person.active?'':' off')},
+        el('div',{class:'comm-who'}, el('div',{class:'comm-name'}, person.name), el('div',{class:'comm-phone'}, fmtPhone(person.phone))),
+        el('label',{class:'switch', title: person.active ? 'On' : 'Paused'}, tog, el('span',{class:'track'}, el('span',{class:'thumb'}))),
+        el('button',{class:'comm-x', title:'Remove', 'aria-label':'Remove '+person.name, onclick:()=>removeRecipient(person),
+          html:'<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})
+      ));
+    }
+    card.append(list);
+    const nameI = el('input',{type:'text', placeholder:'Name', 'aria-label':'Name'});
+    const phoneI = el('input',{type:'tel', placeholder:'Cell number', 'aria-label':'Cell number'});
+    const addBtn = el('button',{class:'btn btn-primary', onclick:()=>addRecipient(t.id, nameI, phoneI)}, 'Add');
+    phoneI.addEventListener('keydown', e=>{ if(e.key==='Enter') addBtn.click(); });
+    card.append(el('div',{class:'comm-add'}, nameI, phoneI, addBtn));
+    const testBtn = el('button',{class:'btn', onclick:()=>sendTestText(t.id, testBtn)}, 'Send test');
+    if(!people.some(x=>x.active)) testBtn.disabled = true;
+    card.append(el('div',{class:'comm-foot'}, testBtn));
+    grid.append(card);
+  }
+}
+async function addRecipient(trigger, nameI, phoneI){
+  const name = nameI.value.trim(), phone = phoneI.value.trim();
+  if(!name){ showToast('Add a name'); nameI.focus(); return; }
+  if(!validPhone(phone)){ showToast('Enter a 10-digit cell number'); phoneI.focus(); return; }
+  const { error } = await sb.from('notify_recipients').insert({ trigger_type:trigger, name, phone: fmtPhone(phone), active:true });
+  if(error){ console.error(error); showToast("Couldn't add that person"); return; }
+  showToast(name+' added'); fetchComms();
+}
+async function toggleRecipient(person, on){
+  const { error } = await sb.from('notify_recipients').update({ active:on }).eq('id', person.id);
+  if(error){ showToast("Couldn't update that"); }
+  fetchComms();
+}
+async function removeRecipient(person){
+  const { error } = await sb.from('notify_recipients').delete().eq('id', person.id);
+  if(error){ showToast("Couldn't remove that"); return; }
+  showToast(person.name+' removed'); fetchComms();
+}
+async function sendTestText(trigger, btn){
+  btn.disabled = true; const label = btn.textContent; btn.textContent = 'Sending…';
+  try{
+    const { data, error } = await sb.functions.invoke('send-texts', { body:{ action:'test', trigger_type:trigger } });
+    if(error){
+      let msg = 'Test failed';
+      try{ const j = await error.context.json(); if(j?.error) msg = j.error; }catch(e){}
+      throw new Error(msg);
+    }
+    showToast('Test sent to '+data.sent+(data.sent===1?' person':' people'));
+  }catch(err){ showToast(err.message || 'Test failed'); }
+  btn.disabled = false; btn.textContent = label;
+  fetchComms();
+}
+
+function renderRepPhones(){
+  const box = $('#repPhoneList'); box.innerHTML = '';
+  const names = new Map();
+  const add = n=>{ const k=(n||'').trim(); if(k && !names.has(k.toLowerCase())) names.set(k.toLowerCase(), k); };
+  REP_SUGGESTIONS.forEach(add);
+  comm.repPhones.forEach(r=>add(r.rep_name));
+  leads.forEach(l=>add(l.assignedRep));
+  for(const name of names.values()){
+    const saved = comm.repPhones.find(r=>r.rep_name.trim().toLowerCase()===name.toLowerCase());
+    const phoneI = el('input',{type:'tel', placeholder:'Cell number', 'aria-label':'Cell for '+name});
+    phoneI.value = saved ? fmtPhone(saved.phone) : '';
+    const saveBtn = el('button',{class:'btn', onclick:()=>saveRepPhone(saved?saved.rep_name:name, phoneI)}, saved ? 'Update' : 'Save');
+    phoneI.addEventListener('keydown', e=>{ if(e.key==='Enter') saveBtn.click(); });
+    box.append(el('div',{class:'rep-row'}, el('div',{class:'rep-name'}, name, saved ? '' : el('span',{class:'badge badge-warn', style:'margin-left:8px;'}, 'No number')), phoneI, saveBtn));
+  }
+  const newName = el('input',{type:'text', placeholder:'Add another rep (exact name)', 'aria-label':'Rep name'});
+  const newPhone = el('input',{type:'tel', placeholder:'Cell number', 'aria-label':'Rep cell'});
+  box.append(el('div',{class:'rep-row'}, newName, newPhone, el('button',{class:'btn btn-primary', onclick:()=>{
+    if(!newName.value.trim()){ showToast('Add the rep name'); return; }
+    saveRepPhone(newName.value.trim(), newPhone);
+  }}, 'Add')));
+}
+async function saveRepPhone(repName, phoneI){
+  const phone = phoneI.value.trim();
+  if(!phone){
+    const { error } = await sb.from('rep_phones').delete().eq('rep_name', repName);
+    showToast(error ? "Couldn't update that" : 'Number removed'); fetchComms(); return;
+  }
+  if(!validPhone(phone)){ showToast('Enter a 10-digit cell number'); phoneI.focus(); return; }
+  const { error } = await sb.from('rep_phones').upsert({ rep_name:repName, phone: fmtPhone(phone), updated_at: new Date().toISOString() });
+  if(error){ console.error(error); showToast("Couldn't save that number"); return; }
+  showToast('Saved '+repName+"'s cell"); fetchComms();
+}
+
+const TRIGGER_LABEL = { new_lead:'New lead', rep_assigned:'Rep assigned', won:'Deal won' };
+function renderTextLog(){
+  const box = $('#textLog'); box.innerHTML = '';
+  if(comm.log.length===0){ box.append(el('div',{class:'empty-note'}, 'No texts yet')); return; }
+  for(const t of comm.log){
+    const to = (t.to_phones||[]).map(fmtPhone).join(', ') || 'no one';
+    const body = el('div',{class:'log-body'}, t.body||'',
+      el('div',{class:'log-meta'}, (TRIGGER_LABEL[t.trigger_type]||t.trigger_type)+' · to '+to+' · '+timeAgo(new Date(t.created_at).getTime()))
+    );
+    if(!t.ok && t.error) body.append(el('div',{class:'log-err'}, t.error));
+    box.append(el('div',{class:'log-row'}, el('span',{class:'log-dot'+(t.ok?'':' bad')}), body));
+  }
+}
+$('#refreshLogBtn').addEventListener('click', fetchComms);
 
 boot();
 </script>
