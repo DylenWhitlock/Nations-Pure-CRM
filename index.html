@@ -1401,6 +1401,7 @@ function openModal(){
     form.append(docsBox);
   } else {
     form.append(el('div',{class:'field'}, el('label',{}, 'Notes'), el('textarea',{id:'f-newnote', placeholder:'Anything worth noting about this lead...'})));
+    form.append(buildSchedBox({ id:null, isDraft:true, name:'', address:'', stage:'new' }));
   }
 
   const actions = el('div',{class:'modal-actions'});
@@ -1423,7 +1424,7 @@ function openModal(){
   setTimeout(()=>nameF.focus(), 50);
 }
 
-async function saveLead(existing){
+async function saveLead(existing, opts={}){
   const data = {
     name: $('#f-name').value.trim(), phone: $('#f-phone').value.trim(), email: $('#f-email').value.trim(), address: $('#f-addr').value.trim(),
     county: $('#f-county').value.trim(), csr: $('#f-csr').value.trim(),
@@ -1462,13 +1463,19 @@ async function saveLead(existing){
       const noteTxt = $('#f-newnote')?.value.trim();
       data.note_log = noteTxt ? [{text:noteTxt, by:currentUser.id, byName:currentUser.name, at:Date.now()}] : [];
       data.created_at = Date.now(); data.created_by = currentUser.id; data.created_by_name = currentUser.name;
-      const { error } = await sb.from('leads').insert(data);
+      const { data: row, error } = await sb.from('leads').insert(data).select().single();
       if(error) throw error;
       notifyNewLead(data);
+      if(opts.noClose){
+        const created = mapLead(row);
+        if(!leads.find(l=>l.id===created.id)) leads.unshift(created);
+        return leads.find(l=>l.id===created.id);
+      }
     }
+    if(opts.noClose) return existing;
     closeModal();
     showToast(existing ? 'Saved' : 'Lead added');
-  }catch(err){ console.error(err); showToast("Couldn't save that lead"); }
+  }catch(err){ console.error(err); showToast("Couldn't save that lead"); return null; }
 }
 /* fire-and-forget text alert to the team — never blocks or fails the save */
 async function notifyNewLead(data){
@@ -1633,75 +1640,68 @@ function populateRepDatalist(dl){
 }
 function slotToMinutes(s){ const [h,m] = s.split(':').map(Number); return h*60+m; }
 
-/* ---- drive-time engine: geocodes cities and estimates drive time so back-to-back
-   appointments aren't booked without room for the drive between them ---- */
-const REP_INHOME_MINUTES = { 'Chris Novotny': 60, 'Tony Rodriguez': 60, 'Dylen Whitlock': 30 };
-function inHomeMinutesFor(rep){ return REP_INHOME_MINUTES[rep] ?? 60; }
+/* ---- drive-time engine: real Google drive times between the actual addresses.
+   A slot can only be booked once the drive math has run and passed. ----
+   Rule per specialist: time in the home + buffer, then the drive to the next address. */
+const REP_RULES = {
+  'dylen whitlock': { inHome:30, buffer:10 },
+  'chris novotny':  { inHome:60, buffer:0 },
+  'tony rodriguez': { inHome:60, buffer:0 },
+};
+function repRule(rep){ return REP_RULES[(rep||'').trim().toLowerCase()] || { inHome:60, buffer:0 }; }
+function inHomeMinutesFor(rep){ return repRule(rep).inHome; }
 function cityFromAddress(addr){
   if(!addr) return '';
-  const parts = addr.split(',');
-  return (parts.length>1 ? parts[parts.length-1] : addr).trim();
+  const parts = addr.split(',').map(p=>p.trim()).filter(Boolean);
+  const rest = parts.filter(p=>!/^(tx|texas)\b|^\d{5}(-\d{4})?$|^usa?$/i.test(p) && !/^(tx|texas)\s+\d{5}/i.test(p));
+  return rest.length>1 ? rest[rest.length-1] : (parts.length>1 ? parts[parts.length-1] : addr.trim());
 }
-const geocodeCache = {};
-async function geocodeCity(place){
-  const key = (place||'').trim().toLowerCase();
-  if(!key) return null;
-  if(key in geocodeCache) return geocodeCache[key];
-  try{
-    const url = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&countrycodes=us&q='+encodeURIComponent(place+', Texas');
-    const resp = await fetch(url, {headers:{'Accept':'application/json'}});
-    const arr = await resp.json();
-    const result = (arr && arr[0]) ? {lat:parseFloat(arr[0].lat), lon:parseFloat(arr[0].lon)} : null;
-    geocodeCache[key] = result;
-    return result;
-  }catch(e){ console.error(e); geocodeCache[key] = null; return null; }
-}
-function haversineMiles(a,b){
-  const R = 3958.8, toRad = d=>d*Math.PI/180;
-  const dLat = toRad(b.lat-a.lat), dLon = toRad(b.lon-a.lon);
-  const s = Math.sin(dLat/2)**2 + Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLon/2)**2;
-  return R * 2 * Math.atan2(Math.sqrt(s), Math.sqrt(1-s));
-}
-async function estimateDriveMinutes(placeA, placeB){
-  if(!placeA || !placeB) return null;
-  if(placeA.trim().toLowerCase()===placeB.trim().toLowerCase()) return 10;
-  const [a,b] = await Promise.all([geocodeCity(placeA), geocodeCity(placeB)]);
-  if(!a || !b) return null;
-  const miles = haversineMiles(a,b) * 1.3; // road-distance fudge over straight-line
-  return Math.max(10, Math.round((miles/32*60)/5)*5); // ~32mph local-roads average, rounded to 5 min
-}
-// For a lead being scheduled, checks every open slot against the rep's other appointments
-// that day and flags any slot that doesn't leave enough drive time + in-home time on either side.
-async function computeTravelBlocks(rep, date, blocksMap, thisCity, inHomeMin){
-  const result = {};
-  if(!thisCity) return result;
-  const booked = SLOTS.filter(s=>blocksMap[s] && blocksMap[s].status==='booked').map(s=>{
-    const rec = blocksMap[s];
-    const leadObj = leads.find(l=>l.id===rec.leadId);
-    return { minutes: slotToMinutes(s), slot:s, city: leadObj ? cityFromAddress(leadObj.address) : '' };
-  }).sort((a,b)=>a.minutes-b.minutes);
-  if(booked.length===0) return result;
-  for(const slot of SLOTS){
-    if(blocksMap[slot]) continue; // already booked/blocked/open — not a travel candidate
-    const t = slotToMinutes(slot);
-    const prev = [...booked].reverse().find(b=>b.minutes < t);
-    const next = booked.find(b=>b.minutes > t);
-    let reason = null;
-    if(prev && prev.city){
-      const drive = await estimateDriveMinutes(prev.city, thisCity);
-      if(drive!=null && prev.minutes + inHomeMinutesFor(rep) + drive > t){
-        reason = 'Not enough drive time after the '+slotLabel(prev.slot)+' stop';
-      }
-    }
-    if(!reason && next && next.city){
-      const drive = await estimateDriveMinutes(thisCity, next.city);
-      if(drive!=null && t + inHomeMin + drive > next.minutes){
-        reason = 'Not enough drive time before the '+slotLabel(next.slot)+' stop';
-      }
-    }
-    if(reason) result[slot] = reason;
+const driveCache = {};   // "a|b" (normalized) -> minutes
+function addrKey(a){ return (a||'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim(); }
+// Fetches drive minutes for every pair among the given addresses (one Google call), cached per pair.
+async function driveMatrix(addresses){
+  const uniq = [...new Set(addresses.map(a=>a.trim()))];
+  const missing = uniq.some((a,i)=>uniq.some((b,k)=>i!==k && !((addrKey(a)+'|'+addrKey(b)) in driveCache)));
+  if(missing){
+    const r = await fetch('/api/drive', { method:'POST', headers:{ 'Content-Type':'application/json', ...(await authHeaders()) }, body: JSON.stringify({ addresses: uniq }) });
+    const d = await r.json().catch(()=>({}));
+    if(!r.ok) throw new Error(d.error || 'Drive-time lookup failed');
+    uniq.forEach((a,i)=>uniq.forEach((b,k)=>{ if(i!==k) driveCache[addrKey(a)+'|'+addrKey(b)] = d.minutes[i][k]; }));
   }
-  return result;
+  return (a,b)=> addrKey(a)===addrKey(b) ? 0 : driveCache[addrKey(a)+'|'+addrKey(b)];
+}
+// Checks every candidate slot against the specialist's other booked appointments that day.
+// Returns { blocked: {slot: reason} } or throws if the drive times can't be calculated
+// (in which case nothing is bookable).
+async function computeTravelBlocks(rep, date, blocksMap, thisAddr, excludeLeadId){
+  const rule = repRule(rep);
+  const booked = SLOTS.filter(s=>blocksMap[s] && blocksMap[s].status==='booked' && blocksMap[s].leadId!==excludeLeadId).map(s=>{
+    const leadObj = leads.find(l=>l.id===blocksMap[s].leadId);
+    return { minutes: slotToMinutes(s), slot:s, addr: (leadObj?.address||'').trim(), name: blocksMap[s].customerName || leadObj?.name || 'a customer' };
+  });
+  const blocked = {};
+  if(booked.length===0) return { blocked };
+  const withAddr = booked.filter(b=>b.addr);
+  const drive = withAddr.length ? await driveMatrix([thisAddr, ...withAddr.map(b=>b.addr)]) : ()=>null;
+  for(const slot of SLOTS){
+    if(blocksMap[slot]) continue;
+    const t = slotToMinutes(slot);
+    for(const b of booked){
+      if(b.minutes < t){            // they leave an earlier appointment and drive here
+        if(!b.addr){ blocked[slot] = "Can't calculate — the "+slotLabel(b.slot)+' appointment has no address'; break; }
+        const m = drive(b.addr, thisAddr);
+        if(m==null){ blocked[slot] = "Can't calculate drive time from the "+slotLabel(b.slot)+' appointment'; break; }
+        const ready = b.minutes + rule.inHome + rule.buffer + m;
+        if(ready > t){ blocked[slot] = 'Too tight — '+m+' min drive after the '+slotLabel(b.slot)+' stop (free at '+slotLabel(String(Math.floor(ready/60)).padStart(2,'0')+':'+String(ready%60).padStart(2,'0'))+')'; break; }
+      } else if(b.minutes > t){     // they leave here and drive to a later appointment
+        if(!b.addr){ blocked[slot] = "Can't calculate — the "+slotLabel(b.slot)+' appointment has no address'; break; }
+        const m = drive(thisAddr, b.addr);
+        if(m==null){ blocked[slot] = "Can't calculate drive time to the "+slotLabel(b.slot)+' appointment'; break; }
+        if(t + rule.inHome + rule.buffer + m > b.minutes){ blocked[slot] = 'Too tight — '+m+' min drive to the '+slotLabel(b.slot)+' stop'; break; }
+      }
+    }
+  }
+  return { blocked };
 }
 
 let activeBlocksQuery = null; // {rep,date,onChange}
@@ -1721,7 +1721,7 @@ function renderSlotList(container, rep, date, blocksMap, mode, onBook, travelBlo
   if(new Date(date+'T00:00:00').getDay()===0){
     container.append(el('div',{class:'empty-note'}, "Nation's Pure doesn't book Sundays")); return;
   }
-  travelBlocks = travelBlocks || {};
+  const travel = travelBlocks || {status:'ok', blocked:{}};
   const grid = el('div',{class:'cal-timeline'});
   for(const slot of SLOTS){
     const rec = blocksMap[slot];
@@ -1748,8 +1748,11 @@ function renderSlotList(container, rep, date, blocksMap, mode, onBook, travelBlo
       cls = 'closed'; statusText = 'Not offered (evening/Saturday)';
       if(mode==='manage') action = el('button',{class:'btn', onclick:()=>openSlotFn(rep,date,slot)}, 'Open this time');
     }
-    if(mode==='book' && travelBlocks[slot] && (cls==='available')){
-      cls = 'travel'; statusText = travelBlocks[slot]; action = null;
+    if(mode==='book' && cls==='available'){
+      if(travel.status==='pending'){ cls = 'travel'; statusText = 'Checking drive time…'; action = null; }
+      else if(travel.status==='noaddr'){ cls = 'travel'; statusText = "Add the customer's address to see open times"; action = null; }
+      else if(travel.status==='error'){ cls = 'travel'; statusText = "Can't book — drive time couldn't be calculated. Try again in a moment."; action = null; }
+      else if(travel.blocked && travel.blocked[slot]){ cls = 'travel'; statusText = travel.blocked[slot]; action = null; }
     }
     const row = el('div',{class:'cal-row'},
       el('div',{class:'cal-time'}, slotLabel(slot)),
@@ -1809,22 +1812,25 @@ function buildSchedBox(lead){
   const dateI = el('input',{type:'date', id:'sch-date'});
   dateI.value = new Date().toISOString().slice(0,10);
   const slotsEl = el('div',{id:'sch-slots'});
+  const currentAddr = ()=>((document.getElementById('f-addr')?.value) || lead.address || '').trim();
+  let runId = 0;
   const refresh = ()=>{
-    const rep = repI.value.trim(), date = dateI.value;
-    const onBook = slot=>bookAppointment(lead, rep, date, slot);
+    const rep = repI.value.trim(), date = dateI.value, addr = currentAddr(), my = ++runId;
+    const onBook = slot=>bookAppointment(lead, rep, date, slot, addr);
     loadBlocksFor(rep, date, async map=>{
-      renderSlotList(slotsEl, rep, date, map, 'book', onBook);
-      const city = cityFromAddress(lead.address);
-      if(rep && date && city){
-        const travel = await computeTravelBlocks(rep, date, map, city, inHomeMinutesFor(rep));
-        if(repI.value.trim()===rep && dateI.value===date){
-          renderSlotList(slotsEl, rep, date, map, 'book', onBook, travel);
-        }
-      }
+      if(my!==runId) return;
+      if(!addr){ renderSlotList(slotsEl, rep, date, map, 'book', onBook, {status:'noaddr'}); return; }
+      renderSlotList(slotsEl, rep, date, map, 'book', onBook, {status:'pending'});
+      let travel;
+      try{ travel = {status:'ok', ...(await computeTravelBlocks(rep, date, map, addr, lead.id))}; }
+      catch(e){ console.error(e); travel = {status:'error', error:e.message}; }
+      if(my===runId) renderSlotList(slotsEl, rep, date, map, 'book', onBook, travel);
     });
   };
   repI.addEventListener('input', refresh);
   dateI.addEventListener('input', refresh);
+  let addrTimer = null;
+  setTimeout(()=>{ const a = document.getElementById('f-addr'); if(a) a.addEventListener('input', ()=>{ clearTimeout(addrTimer); addrTimer = setTimeout(refresh, 700); }); }, 0);
   box.append(
     el('div',{class:'sched-row'},
       el('div',{class:'field'}, el('label',{}, 'Water specialist'), repI),
@@ -1835,8 +1841,28 @@ function buildSchedBox(lead){
   setTimeout(refresh, 0);
   return box;
 }
-async function bookAppointment(lead, rep, date, slot){
+async function bookAppointment(lead, rep, date, slot, addr){
   if(!rep){ showToast('Pick a water specialist first'); return; }
+  addr = (addr||'').trim();
+  if(!addr){ showToast("Add the customer's address first"); return; }
+  // Re-check against the latest schedule right before booking — nothing books without the drive math passing.
+  try{
+    const { data, error } = await sb.from('blocks').select('*').eq('rep', rep).eq('date', date);
+    if(error) throw error;
+    const map = {};
+    data.forEach(v=>{ map[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name }; });
+    if(map[slot] && map[slot].status!=='open'){ showToast('That time was just taken'); if(!lead.isDraft) openModal(); return; }
+    delete map[slot];
+    const check = await computeTravelBlocks(rep, date, map, addr, lead.id);
+    if(check.blocked[slot]){ showToast(check.blocked[slot]); if(!lead.isDraft) openModal(); return; }
+  }catch(err){ console.error(err); showToast("Can't book — drive time couldn't be calculated"); return; }
+  if(lead.isDraft){
+    // new lead: save it now (with everything typed on the form), then book it
+    const created = await saveLead(null, { noClose:true });
+    if(!created) return;
+    lead = created;
+    state.adding = false; state.editingId = lead.id;
+  }
   try{
     const { error: e1 } = await sb.from('blocks').upsert({
       id:blockDocId(rep,date,slot), rep, date, slot, status:'booked',
@@ -1844,6 +1870,7 @@ async function bookAppointment(lead, rep, date, slot){
     });
     if(e1) throw e1;
     const upd = { assigned_rep:rep, appt_date:date, appt_start:slot, updated_at:Date.now() };
+    if(addr !== (lead.address||'').trim()){ upd.address = addr; lead.address = addr; }
     if(lead.stage==='new') upd.stage = 'scheduled';
     const { error: e2 } = await sb.from('leads').update(upd).eq('id', lead.id);
     if(e2) throw e2;
