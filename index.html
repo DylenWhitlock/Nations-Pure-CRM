@@ -1024,7 +1024,7 @@ $('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
 /* ================= DATA MAPPING ================= */
 function mapLead(r){
   return {
-    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, need:r.need, stage:r.stage,
+    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, leadSource:r.lead_source||'', need:r.need, stage:r.stage,
     salePrice:r.sale_price, systemName:r.system_name,
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
@@ -1331,6 +1331,10 @@ function openModal(){
   const phoneF = el('input',{type:'tel', id:'f-phone', placeholder:'(214) 555-0100'}); phoneF.value = lead?.phone||'';
   const emailF = el('input',{type:'email', id:'f-email', placeholder:'name@email.com'}); emailF.value = lead?.email||'';
   const csrF = el('input',{type:'text', id:'f-csr', placeholder:'Who took this call?'}); csrF.value = lead?.csr||'';
+  const sourceF = el('input',{type:'text', id:'f-source', list:'sourceList', placeholder:'How did they hear about us?'}); sourceF.value = lead?.leadSource||'';
+  const sourceList = el('datalist',{id:'sourceList'});
+  ['Google','Facebook','Instagram','Website','Referral','Repeat customer','Yard sign','Truck wrap','Home show / event','Radio','Mailer','Nextdoor','Yelp','Angi','Other']
+    .forEach(o=>sourceList.append(el('option',{value:o})));
   const addrF = el('input',{type:'text', id:'f-addr', placeholder:'Street, city'}); addrF.value = lead?.address||'';
   const countyF = el('input',{type:'text', id:'f-county', placeholder:'e.g. Tarrant'}); countyF.value = lead?.county||'';
   const needF = el('textarea',{id:'f-need', placeholder:'What do they need? Softener, filtration, testing...'}); needF.value = lead?.need||'';
@@ -1367,7 +1371,11 @@ function openModal(){
       el('div',{class:'field'}, el('label',{}, 'Address'), addrF),
       el('div',{class:'field'}, el('label',{}, 'County'), countyF)
     ),
-    el('div',{class:'field'}, el('label',{}, 'CSR'), csrF),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'CSR'), csrF),
+      el('div',{class:'field'}, el('label',{}, 'Lead source'), sourceF)
+    ),
+    sourceList,
     el('div',{class:'field'}, el('label',{}, 'What they need'), needF),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Requested window'), windowF),
@@ -1427,7 +1435,7 @@ function openModal(){
 async function saveLead(existing, opts={}){
   const data = {
     name: $('#f-name').value.trim(), phone: $('#f-phone').value.trim(), email: $('#f-email').value.trim(), address: $('#f-addr').value.trim(),
-    county: $('#f-county').value.trim(), csr: $('#f-csr').value.trim(),
+    county: $('#f-county').value.trim(), csr: $('#f-csr').value.trim(), lead_source: ($('#f-source')?.value||'').trim(),
     need: $('#f-need').value.trim(), requested_window: $('#f-window').value.trim(),
     stage: $('#f-stage').value,
     off_hours: $('#f-offhours').checked, rep_confirmed: $('#f-confirmed').checked, updated_at: Date.now(),
@@ -1452,7 +1460,7 @@ async function saveLead(existing, opts={}){
       // patch the in-memory copy immediately rather than waiting on the realtime
       // round-trip, so a stage change (esp. into Won) can't appear to "revert"
       Object.assign(existing, {
-        name:data.name, phone:data.phone, email:data.email, address:data.address, county:data.county, csr:data.csr,
+        name:data.name, phone:data.phone, email:data.email, address:data.address, county:data.county, csr:data.csr, leadSource:data.lead_source,
         need:data.need, requestedWindow:data.requested_window, stage:data.stage,
         offHours:data.off_hours, repConfirmed:data.rep_confirmed, updatedAt:data.updated_at,
         ...(data.sale_price!=null ? {salePrice:data.sale_price} : {}),
@@ -2539,6 +2547,7 @@ function openApptSheet(id){
   if(lead.email) info.append(infoRow('Email', el('a',{href:'mailto:'+lead.email}, lead.email)));
   if(lead.address) info.append(infoRow('Address', lead.address));
   if(lead.county) info.append(infoRow('County', lead.county));
+  if(lead.leadSource) info.append(infoRow('Lead source', lead.leadSource));
   if(lead.need) info.append(infoRow('Needs', lead.need));
   if(lead.stage==='won' && (lead.systemName || lead.salePrice)) info.append(infoRow('Sold', [lead.systemName, lead.salePrice?fmtMoney(lead.salePrice):''].filter(Boolean).join(' · ')));
   form.append(info);
