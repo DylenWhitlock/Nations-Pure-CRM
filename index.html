@@ -607,6 +607,19 @@ body{
 .sk-line.short{width:40%; height:9px;}
 @keyframes shimmer{to{background-position:-200% 0;}}
 
+/* lead sources table */
+.src-scroll{overflow-x:auto; margin:0 -4px;}
+.src-table{min-width:640px; display:flex; flex-direction:column;}
+.src-row{display:grid; grid-template-columns:minmax(170px,2fr) repeat(4,minmax(64px,1fr)) minmax(96px,1.2fr) minmax(84px,1fr); gap:10px; align-items:center; padding:11px 4px; border-top:1px solid var(--border); font-size:13px; font-variant-numeric:tabular-nums;}
+.src-row:first-child{border-top:none;}
+.src-head{font-size:11.5px; font-weight:700; color:var(--text-muted); text-transform:uppercase; letter-spacing:.05em; padding-top:0;}
+.src-row.muted{color:var(--text-muted);}
+.src-name{display:flex; flex-direction:column; gap:6px; min-width:0;}
+.src-name b{font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.src-bar{height:5px; border-radius:99px; background:var(--surface-3); overflow:hidden;}
+.src-bar span{display:block; height:100%; border-radius:99px; background:linear-gradient(90deg, var(--accent), var(--accent-strong));}
+.src-rev{font-weight:700;}
+
 /* house thumbnails in the schedule list */
 .appt-thumb{position:relative; width:64px; height:44px; border-radius:7px; overflow:hidden; background:var(--surface-3); flex:none; border:1px solid var(--border);}
 .appt-thumb img{position:absolute; inset:0; width:100%; height:100%; object-fit:cover; opacity:0; transition:opacity .3s;}
@@ -833,6 +846,20 @@ body{
         </div>
       </div>
       <div id="leaderboard"></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head">
+        <div>
+          <h2>Lead sources</h2>
+          <div class="panel-sub">Which sources turn into appointments and sales</div>
+        </div>
+        <div class="seg" id="srcRangeSeg">
+          <button data-range="month">This month</button>
+          <button data-range="year">This year</button>
+          <button data-range="all" class="on">All time</button>
+        </div>
+      </div>
+      <div id="sourceTable"></div>
     </div>
     </div>
   </div>
@@ -1157,6 +1184,7 @@ function fmtMoney(n){
 function renderAnalytics(){
   if(!currentUser) return;
   if(currentUser.role==='rep'){ renderRepAnalytics(); return; }
+  renderSourceTable();
   const roster = Array.from(new Set([...REP_SUGGESTIONS, ...leads.map(l=>l.assignedRep).filter(Boolean)]));
   const rows = roster.map(rep=>{
     const mine = leads.filter(l=>l.assignedRep===rep);
@@ -2729,6 +2757,43 @@ function buildPropertyCard(lead){
   if(!propCache[key]?.data) loadProperty(lead.address).then(paint, paint);
   return box;
 }
+
+/* ================= LEAD SOURCES ================= */
+let srcRange = 'all';
+function renderSourceTable(){
+  const box = $('#sourceTable'); if(!box) return;
+  box.innerHTML = '';
+  const now = new Date();
+  const inR = ts=>{ if(srcRange==='all') return true; const d = new Date(ts||0);
+    return srcRange==='year' ? d.getFullYear()===now.getFullYear() : (d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth()); };
+  const groups = {};
+  leads.filter(l=>inR(l.createdAt)).forEach(l=>{
+    const k = (l.leadSource||'').trim() || 'Not set';
+    const g = groups[k] = groups[k] || { source:k, leads:0, appts:0, won:0, revenue:0 };
+    g.leads++;
+    if(l.apptDate) g.appts++;
+    if(l.stage==='won'){ g.won++; g.revenue += Number(l.salePrice)||0; }
+  });
+  const rows = Object.values(groups).sort((a,b)=> (a.source==='Not set')-(b.source==='Not set') || b.revenue-a.revenue || b.won-a.won || b.leads-a.leads);
+  if(!rows.length){ box.append(el('div',{class:'empty-note'}, 'No leads in this period yet')); return; }
+  const maxRev = Math.max(1, ...rows.map(r=>r.revenue));
+  const tbl = el('div',{class:'src-table'},
+    el('div',{class:'src-row src-head'}, el('span',{}, 'Source'), el('span',{}, 'Leads'), el('span',{}, 'Appts'), el('span',{}, 'Won'), el('span',{}, 'Close rate'), el('span',{}, 'Revenue'), el('span',{}, 'Avg sale')));
+  rows.forEach(r=>{
+    const close = r.appts ? Math.round(r.won/r.appts*100)+'%' : '—';
+    tbl.append(el('div',{class:'src-row'+(r.source==='Not set'?' muted':'')},
+      el('span',{class:'src-name'}, el('b',{}, r.source), el('span',{class:'src-bar'}, el('span',{style:'width:'+(r.revenue/maxRev*100).toFixed(1)+'%'}))),
+      el('span',{}, String(r.leads)), el('span',{}, String(r.appts)), el('span',{}, String(r.won)),
+      el('span',{}, close), el('span',{class:'src-rev'}, fmtMoney(r.revenue)), el('span',{}, r.won ? fmtMoney(r.revenue/r.won) : '—')));
+  });
+  box.append(el('div',{class:'src-scroll'}, tbl));
+}
+$('#srcRangeSeg').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-range]'); if(!b) return;
+  srcRange = b.dataset.range;
+  $('#srcRangeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+  renderSourceTable();
+});
 
 /* ================= REP: MY ANALYTICS ================= */
 let repRange = 'month';
