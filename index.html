@@ -607,6 +607,23 @@ body{
 .sk-line.short{width:40%; height:9px;}
 @keyframes shimmer{to{background-position:-200% 0;}}
 
+/* install / service channel switch */
+.chan-seg button{padding:7px 16px; font-size:13px;}
+.chan-seg button[data-ch=service].on{color:#B45309;}
+.svc-box{border:1px solid var(--border); border-radius:var(--radius-m); padding:12px; display:flex; flex-direction:column; gap:12px; background:var(--surface-2);}
+.svc-box .sec-h{font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#B45309;}
+.svc-files{display:flex; flex-direction:column; gap:6px;}
+.svc-file{display:flex; align-items:center; gap:8px; font-size:13px; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:7px 10px;}
+.svc-file .nm{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; font-weight:600;}
+.svc-file a, .svc-file button{color:var(--accent-strong); font-weight:600; text-decoration:none; background:none; border:none; cursor:pointer; font-family:inherit; font-size:12.5px; padding:0;}
+.svc-file button.rm{color:var(--text-muted);}
+.svc-add{display:grid; grid-template-columns:1fr auto auto; gap:8px; align-items:center;}
+.svc-add input[type=text]{border:1px solid var(--border); border-radius:9px; padding:9px 11px; font-size:13px; font-family:inherit; background:var(--bg); color:var(--text); min-width:0;}
+.svc-add .filepick{white-space:nowrap; max-width:180px; overflow:hidden; text-overflow:ellipsis;}
+@media (max-width:560px){ .svc-add{grid-template-columns:1fr 1fr;} .svc-add input[type=text]{grid-column:1/-1;} }
+.badge-svc{background:#FEF3C7; color:#92400E;}
+.tech-notes{white-space:pre-wrap;}
+
 /* lead sources table */
 .src-scroll{overflow-x:auto; margin:0 -4px;}
 .src-table{min-width:640px; display:flex; flex-direction:column;}
@@ -692,6 +709,10 @@ body{
 <div class="wrap">
   <div class="page-head">
     <div><div class="page-eyebrow" id="pageDate"></div><h1 id="pageTitle">Pipeline</h1></div>
+    <div class="seg chan-seg" id="chanSeg">
+      <button data-ch="install" class="on">Installs</button>
+      <button data-ch="service">Service</button>
+    </div>
   </div>
 
   <div id="leadsView">
@@ -924,7 +945,12 @@ let realtimeChannel = null;
 let leads = [];
 let brochures = [];
 let workOrders = [];
-let state = { view:'leads', search:'', editingId:null, adding:false, confirmingDeleteId:null };
+let state = { view:'leads', search:'', editingId:null, adding:false, confirmingDeleteId:null, channel:'install' };
+try{ if(localStorage.getItem('np_channel')==='service') state.channel = 'service'; }catch(e){}
+function leadChannel(l){ return l && l.channel==='service' ? 'service' : 'install'; }
+function chanLeads(arr){ return arr.filter(l=>leadChannel(l)===state.channel); }
+function isService(){ return state.channel==='service'; }
+let pendingSvcFiles = [];   // files picked on a lead that isn't saved yet: [{name, file}]
 
 function $(sel, root=document){ return root.querySelector(sel); }
 function el(tag, attrs={}, ...kids){
@@ -1057,6 +1083,7 @@ function mapLead(r){
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
     createdAt:r.created_at, updatedAt:r.updated_at,
+    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
   };
 }
 async function fetchLeads(){
@@ -1112,8 +1139,12 @@ function setView(v){
   if(v==='leads' && isRepUser()) v = 'calendar';
   state.view = v;
   const rep = isRepUser();
-  $('#pageTitle').textContent = {leads:'Pipeline', calendar: rep?'My schedule':'Calendar', documents:'Documents',
-    analytics: rep?'My performance':'Team analytics', profile:'Profile & communications'}[v] || '';
+  const ch = isService() ? 'Service' : 'Install';
+  $('#pageTitle').textContent = {leads: ch+' pipeline', calendar: rep?'My schedule':'Calendar', documents:'Documents',
+    analytics: rep?'My performance · '+ch:ch+' analytics', profile:'Profile & communications'}[v] || '';
+  $('#chanSeg').hidden = !(v==='leads' || v==='analytics');
+  $('#chanSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.ch===state.channel));
+  $('#newLeadBtn').lastChild.textContent = isService() ? ' New service lead' : ' New lead';
   $('#pageDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'});
   $('#tabLeads').classList.toggle('active', v==='leads');
   $('#tabDocs').classList.toggle('active', v==='documents');
@@ -1136,6 +1167,12 @@ $('#tabLeads').addEventListener('click', ()=>setView('leads'));
 $('#tabDocs').addEventListener('click', ()=>setView('documents'));
 $('#tabCal').addEventListener('click', ()=>setView('calendar'));
 $('#tabAnalytics').addEventListener('click', ()=>setView('analytics'));
+function setChannel(ch){
+  state.channel = ch==='service' ? 'service' : 'install';
+  try{ localStorage.setItem('np_channel', state.channel); }catch(e){}
+  setView(state.view); render();
+}
+$('#chanSeg').addEventListener('click', e=>{ const b = e.target.closest('button[data-ch]'); if(b) setChannel(b.dataset.ch); });
 
 /* ---------- leads board ---------- */
 function isOffHoursUnconfirmed(l){ return !!l.offHours && !l.repConfirmed && l.stage!=='won' && l.stage!=='lost'; }
@@ -1147,8 +1184,9 @@ function matchesSearch(l){
 function render(){ renderStats(); renderBoard(); if(state.view==='analytics') renderAnalytics(); if(state.view==='calendar') gcRender(); if(state.apptId) openApptSheet(state.apptId); }
 
 function visibleLeads(){
-  if(!currentUser || currentUser.role !== 'rep') return leads;
-  return leads.filter(l => l.assignedRep === currentUser.name || l.createdByName === currentUser.name);
+  const scoped = chanLeads(leads);
+  if(!currentUser || currentUser.role !== 'rep') return scoped;
+  return scoped.filter(l => l.assignedRep === currentUser.name || l.createdByName === currentUser.name);
 }
 
 function renderStats(){
@@ -1185,9 +1223,10 @@ function renderAnalytics(){
   if(!currentUser) return;
   if(currentUser.role==='rep'){ renderRepAnalytics(); return; }
   renderSourceTable();
-  const roster = Array.from(new Set([...REP_SUGGESTIONS, ...leads.map(l=>l.assignedRep).filter(Boolean)]));
+  const cl = chanLeads(leads);
+  const roster = Array.from(new Set([...REP_SUGGESTIONS, ...cl.map(l=>l.assignedRep).filter(Boolean)]));
   const rows = roster.map(rep=>{
-    const mine = leads.filter(l=>l.assignedRep===rep);
+    const mine = cl.filter(l=>l.assignedRep===rep);
     const appts = mine.filter(l=>l.apptDate).length;
     const won = mine.filter(l=>l.stage==='won');
     const totalRevenue = won.reduce((sum,l)=>sum+(Number(l.salePrice)||0),0);
@@ -1349,7 +1388,7 @@ function openModal(){
 
   const form = el('div',{class:'modal'});
   form.append(el('div',{class:'modal-head'},
-    el('h2',{}, lead ? 'Edit lead' : 'New lead'),
+    el('h2',{}, lead ? (leadChannel(lead)==='service' ? 'Edit service lead' : 'Edit lead') : (isService() ? 'New service lead' : 'New lead')),
     el('button',{class:'icon-btn', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})
   ));
 
@@ -1381,6 +1420,14 @@ function openModal(){
     }
   });
 
+  const chanF = el('select',{id:'f-channel'});
+  const curChan = lead ? leadChannel(lead) : state.channel;
+  [['install','Install'],['service','Service']].forEach(([v,t])=>chanF.append(el('option',{value:v, ...(v===curChan?{selected:'selected'}:{})}, t)));
+  if(!lead) pendingSvcFiles = [];
+  const svcBox = buildServiceBox(lead);
+  svcBox.hidden = curChan!=='service';
+  chanF.addEventListener('change', ()=>{ svcBox.hidden = chanF.value!=='service'; });
+
   const offToggle = el('input',{type:'checkbox', id:'f-offhours'}); offToggle.checked = !!lead?.offHours;
   const confirmToggle = el('input',{type:'checkbox', id:'f-confirmed'}); confirmToggle.checked = !!lead?.repConfirmed;
   const confirmRow = el('div',{class:'toggle-row', id:'confirmRow', hidden: !offToggle.checked},
@@ -1390,7 +1437,10 @@ function openModal(){
   offToggle.addEventListener('change', ()=>{ confirmRow.hidden = !offToggle.checked; if(!offToggle.checked) confirmToggle.checked=false; });
 
   form.append(
-    el('div',{class:'field'}, el('label',{}, 'Name'), nameF),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'Name'), nameF),
+      el('div',{class:'field'}, el('label',{}, 'Lead type'), chanF)
+    ),
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Phone'), phoneF),
       el('div',{class:'field'}, el('label',{}, 'Email'), emailF)
@@ -1405,6 +1455,7 @@ function openModal(){
     ),
     sourceList,
     el('div',{class:'field'}, el('label',{}, 'What they need'), needF),
+    svcBox,
     el('div',{class:'row2'},
       el('div',{class:'field'}, el('label',{}, 'Requested window'), windowF),
       el('div',{class:'field'}, el('label',{}, 'Stage'), stageF)
@@ -1467,6 +1518,7 @@ async function saveLead(existing, opts={}){
     need: $('#f-need').value.trim(), requested_window: $('#f-window').value.trim(),
     stage: $('#f-stage').value,
     off_hours: $('#f-offhours').checked, rep_confirmed: $('#f-confirmed').checked, updated_at: Date.now(),
+    channel: $('#f-channel')?.value==='service' ? 'service' : 'install', tech_notes: ($('#f-technotes')?.value||'').trim(),
   };
   if(!data.name){ showToast('Add a name first'); return; }
   if(data.stage==='won'){
@@ -1491,6 +1543,7 @@ async function saveLead(existing, opts={}){
         name:data.name, phone:data.phone, email:data.email, address:data.address, county:data.county, csr:data.csr, leadSource:data.lead_source,
         need:data.need, requestedWindow:data.requested_window, stage:data.stage,
         offHours:data.off_hours, repConfirmed:data.rep_confirmed, updatedAt:data.updated_at,
+        channel:data.channel, techNotes:data.tech_notes,
         ...(data.sale_price!=null ? {salePrice:data.sale_price} : {}),
         ...(data.system_name!=null ? {systemName:data.system_name} : {}),
       });
@@ -1502,6 +1555,15 @@ async function saveLead(existing, opts={}){
       const { data: row, error } = await sb.from('leads').insert(data).select().single();
       if(error) throw error;
       notifyNewLead(data);
+      if(data.channel==='service' && pendingSvcFiles.length){
+        const files = await uploadServiceFiles(pendingSvcFiles);
+        pendingSvcFiles = [];
+        if(files.length){
+          const { error: fe } = await sb.from('leads').update({ service_files: files }).eq('id', row.id);
+          if(fe) showToast("Lead saved, but the PDFs didn't attach"); else row.service_files = files;
+        }
+      }
+      if(data.channel!==state.channel){ state.channel = data.channel; try{ localStorage.setItem('np_channel', state.channel); }catch(e){} setView(state.view); }
       if(opts.noClose){
         const created = mapLead(row);
         if(!leads.find(l=>l.id===created.id)) leads.unshift(created);
@@ -1510,9 +1572,95 @@ async function saveLead(existing, opts={}){
     }
     if(opts.noClose) return existing;
     closeModal();
-    showToast(existing ? 'Saved' : 'Lead added');
+    showToast(existing ? 'Saved' : (data.channel==='service' ? 'Service lead added' : 'Lead added'));
   }catch(err){ console.error(err); showToast("Couldn't save that lead"); return null; }
 }
+/* ---------- service leads: previous tech notes + named PDFs ---------- */
+const SVC_BUCKET = 'service-files';
+async function uploadServiceFiles(list){
+  const out = [];
+  for(const f of list){
+    try{
+      const path = await uploadToBucket(SVC_BUCKET, f.file, f.file.name);
+      out.push({ name:f.name, path, at:Date.now(), byName: currentUser?.name||'' });
+    }catch(e){ console.error(e); showToast("Couldn't upload "+f.name); }
+  }
+  return out;
+}
+function svcFileLink(f){
+  const a = el('a',{href:'#', target:'_blank', rel:'noopener'}, 'Open');
+  a.addEventListener('click', ev=>{ if(a.getAttribute('href')==='#'){ ev.preventDefault(); showToast('Still loading — try again'); } });
+  signedUrl(SVC_BUCKET, f.path).then(u=>{ if(u) a.href = u; });
+  return a;
+}
+function serviceFilesList(lead, editable){
+  const list = el('div',{class:'svc-files'});
+  const saved = lead ? (lead.serviceFiles||[]) : [];
+  saved.forEach((f,i)=>{
+    const row = el('div',{class:'svc-file'}, el('span',{class:'nm', title:f.name}, f.name||'Document'), svcFileLink(f));
+    if(editable) row.append(el('button',{class:'rm', onclick:()=>removeServiceFile(lead, i)}, 'Remove'));
+    list.append(row);
+  });
+  if(!lead){
+    pendingSvcFiles.forEach((f,i)=>list.append(el('div',{class:'svc-file'},
+      el('span',{class:'nm', title:f.name}, f.name), el('span',{style:'font-size:12px;color:var(--text-muted)'}, 'attaches on save'),
+      el('button',{class:'rm', onclick:()=>{ pendingSvcFiles.splice(i,1); list.replaceWith(serviceFilesList(null, true)); }}, 'Remove'))));
+  }
+  if(!list.children.length) list.append(el('div',{class:'empty-note', style:'padding:2px'}, 'No PDFs yet'));
+  return list;
+}
+function buildServiceBox(lead){
+  const box = el('div',{class:'svc-box'}, el('div',{class:'sec-h'}, 'Service details'));
+  const notes = el('textarea',{id:'f-technotes', placeholder:'What the last tech found or did — equipment, settings, parts, issues...'});
+  notes.value = lead?.techNotes||'';
+  box.append(el('div',{class:'field'}, el('label',{}, 'Previous tech notes'), notes));
+
+  const filesField = el('div',{class:'field'}, el('label',{}, 'PDF documents'));
+  let list = serviceFilesList(lead, true);
+  const nameI = el('input',{type:'text', placeholder:'Name it (e.g. Last service report)'});
+  const fileI = el('input',{type:'file', accept:'application/pdf'});
+  const pickLbl = el('span',{}, 'Choose PDF');
+  const pick = el('label',{class:'filepick'}, pickLbl, fileI);
+  fileI.addEventListener('change', ()=>{
+    const f = fileI.files[0]; pickLbl.textContent = f ? f.name : 'Choose PDF';
+    if(f && !nameI.value.trim()) nameI.value = f.name.replace(/\.pdf$/i,'');
+  });
+  const addBtn = el('button',{class:'btn', onclick:async ()=>{
+    const f = fileI.files[0], nm = nameI.value.trim();
+    if(!f){ showToast('Choose a PDF first'); return; }
+    if(f.type && f.type!=='application/pdf' && !/\.pdf$/i.test(f.name)){ showToast('That file isn\'t a PDF'); return; }
+    if(!nm){ showToast('Give the PDF a name'); nameI.focus(); return; }
+    if(lead){
+      addBtn.disabled = true; addBtn.textContent = 'Uploading...';
+      const up = await uploadServiceFiles([{name:nm, file:f}]);
+      addBtn.disabled = false; addBtn.textContent = 'Add';
+      if(!up.length) return;
+      const files = [...(lead.serviceFiles||[]), ...up];
+      const { error } = await sb.from('leads').update({ service_files: files, updated_at: Date.now() }).eq('id', lead.id);
+      if(error){ showToast("Couldn't attach that PDF"); return; }
+      lead.serviceFiles = files;
+      showToast('PDF added');
+    } else {
+      pendingSvcFiles.push({ name:nm, file:f });
+    }
+    nameI.value = ''; fileI.value = ''; pickLbl.textContent = 'Choose PDF';
+    const fresh = serviceFilesList(lead, true); list.replaceWith(fresh); list = fresh;
+  }}, 'Add');
+  filesField.append(list, el('div',{class:'svc-add'}, nameI, pick, addBtn));
+  box.append(filesField);
+  return box;
+}
+async function removeServiceFile(lead, i){
+  const f = (lead.serviceFiles||[])[i]; if(!f) return;
+  const files = lead.serviceFiles.filter((_,k)=>k!==i);
+  const { error } = await sb.from('leads').update({ service_files: files, updated_at: Date.now() }).eq('id', lead.id);
+  if(error){ showToast("Couldn't remove that"); return; }
+  await deleteFromBucket(SVC_BUCKET, f.path);
+  lead.serviceFiles = files;
+  showToast('PDF removed');
+  if(state.editingId===lead.id) openModal();
+}
+
 /* fire-and-forget text alert to the team — never blocks or fails the save */
 async function notifyNewLead(data){
   return; // new-lead texts are now sent by Supabase (send-texts) — avoids double texts
@@ -2305,7 +2453,7 @@ function gcOpenAppt(lead){
   if(isRepUser()) openApptSheet(lead.id);
   else openEdit(lead.id);
 }
-function gcEventText(l){ return [l.name||'Customer', cityFromAddress(l.address)].filter(Boolean); }
+function gcEventText(l){ return [(leadChannel(l)==='service'?'SVC · ':'')+(l.name||'Customer'), cityFromAddress(l.address)].filter(Boolean); }
 
 function gcTimeGrid(){
   const days = gcDays();
@@ -2577,8 +2725,13 @@ function openApptSheet(id){
   if(lead.county) info.append(infoRow('County', lead.county));
   if(lead.leadSource) info.append(infoRow('Lead source', lead.leadSource));
   if(lead.need) info.append(infoRow('Needs', lead.need));
+  if(leadChannel(lead)==='service') info.append(infoRow('Type', el('span',{class:'badge badge-svc'}, 'Service')));
+  if(leadChannel(lead)==='service' && lead.techNotes) info.append(infoRow('Previous tech notes', el('span',{class:'tech-notes'}, lead.techNotes)));
   if(lead.stage==='won' && (lead.systemName || lead.salePrice)) info.append(infoRow('Sold', [lead.systemName, lead.salePrice?fmtMoney(lead.salePrice):''].filter(Boolean).join(' · ')));
   form.append(info);
+  if(leadChannel(lead)==='service' && (lead.serviceFiles||[]).length){
+    form.append(el('div',{class:'lead-docs'}, el('div',{class:'lbl'}, 'Service PDFs'), serviceFilesList(lead, false)));
+  }
 
   const outcome = el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Outcome'));
   const row = el('div',{class:'outcome-row'});
@@ -2767,7 +2920,7 @@ function renderSourceTable(){
   const inR = ts=>{ if(srcRange==='all') return true; const d = new Date(ts||0);
     return srcRange==='year' ? d.getFullYear()===now.getFullYear() : (d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth()); };
   const groups = {};
-  leads.filter(l=>inR(l.createdAt)).forEach(l=>{
+  chanLeads(leads).filter(l=>inR(l.createdAt)).forEach(l=>{
     const k = (l.leadSource||'').trim() || 'Not set';
     const g = groups[k] = groups[k] || { source:k, leads:0, appts:0, won:0, revenue:0 };
     g.leads++;
@@ -2804,7 +2957,7 @@ function inRange(ts, range){
   return d.getFullYear()===now.getFullYear() && d.getMonth()===now.getMonth();
 }
 function renderRepAnalytics(){
-  const mine = myLeads();
+  const mine = chanLeads(myLeads());
   const appts = mine.filter(l=>l.apptDate && (l.apptDate<todayStr() || ['quoted','won','lost'].includes(l.stage)) && inRange(new Date(l.apptDate+'T12:00:00').getTime(), repRange));
   const won = mine.filter(l=>l.stage==='won' && inRange(l.updatedAt||l.createdAt, repRange));
   const quoted = mine.filter(l=>l.stage==='quoted' && inRange(l.updatedAt||l.createdAt, repRange));
