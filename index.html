@@ -538,6 +538,7 @@ body{
 .card-loc{display:flex; align-items:center; gap:5px; font-size:12px; color:var(--text-muted); margin-top:-3px;}
 .card-loc svg{flex:none; opacity:.8;}
 .card-need{font-size:12.5px; line-height:1.4;}
+.card-stamp{font-size:11.5px; font-weight:600; color:var(--text-muted); font-variant-numeric:tabular-nums;}
 .badge{border-radius:6px; font-weight:600; padding:3px 7px; font-size:11px;}
 .badge-rep{display:inline-flex; align-items:center; gap:5px; padding:2px 8px 2px 2px; background:var(--surface-2); color:var(--text); border:1px solid var(--border);}
 .avatar{width:18px; height:18px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:9px; font-weight:700; color:#fff; flex:none; letter-spacing:0;}
@@ -964,7 +965,21 @@ function el(tag, attrs={}, ...kids){
   for(const kid of kids){ if(kid==null) continue; n.append(kid.nodeType ? kid : document.createTextNode(kid)); }
   return n;
 }
+function toMs(ts){
+  if(ts==null || ts==='') return null;
+  if(typeof ts==='number') return ts;
+  const n = Number(ts); if(!isNaN(n)) return n;
+  const d = Date.parse(ts); return isNaN(d) ? null : d;
+}
+function fmtStamp(ts){
+  ts = toMs(ts); if(!ts) return '';
+  const d = new Date(ts);
+  const date = d.toLocaleDateString('en-US',{timeZone:'America/Chicago', month:'short', day:'numeric', year:'numeric'});
+  const time = d.toLocaleTimeString('en-US',{timeZone:'America/Chicago', hour:'numeric', minute:'2-digit'});
+  return date+' · '+time;
+}
 function timeAgo(ts){
+  ts = toMs(ts);
   if(!ts) return '';
   const s = Math.max(1, Math.floor((Date.now()-ts)/1000));
   if(s<60) return 'just now';
@@ -1082,7 +1097,7 @@ function mapLead(r){
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
-    createdAt:r.created_at, updatedAt:r.updated_at,
+    createdAt:toMs(r.created_at), updatedAt:toMs(r.updated_at),
     channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
   };
 }
@@ -1314,6 +1329,7 @@ function renderCard(lead){
   card.append(el('div',{class:'card-name'}, lead.name||'Unnamed lead'));
   if(lead.address) card.append(el('div',{class:'card-loc', html:'<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/></svg>'}, cityFromAddress(lead.address)));
   if(lead.need) card.append(el('div',{class:'card-need'}, lead.need));
+  if(lead.createdAt) card.append(el('div',{class:'card-stamp'}, 'Lead in: '+fmtStamp(lead.createdAt)));
   const meta = el('div',{class:'card-meta'});
   if(lead.assignedRep) meta.append(el('span',{class:'badge badge-rep'}, repAvatar(lead.assignedRep), lead.assignedRep.split(' ')[0]));
   if(lead.apptDate && lead.apptStart){
@@ -1469,7 +1485,7 @@ function openModal(){
   );
 
   if(lead){
-    const label = lead.createdByName ? 'Added by '+esc(lead.createdByName)+' · '+timeAgo(lead.createdAt) : 'Added '+timeAgo(lead.createdAt);
+    const label = 'Lead in: '+fmtStamp(lead.createdAt)+(lead.createdByName ? ' · Added by '+lead.createdByName : '');
     form.append(el('div',{class:'attrib'}, label));
 
     form.append(buildSchedBox(lead));
