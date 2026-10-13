@@ -320,6 +320,12 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .gc-mchip .tm{color:var(--text-muted); flex:none;}
 .gc-mchip .nm{overflow:hidden; text-overflow:ellipsis; font-weight:600;}
 .gc-offchip{font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; color:var(--text-muted); background:repeating-linear-gradient(135deg, var(--surface-2), var(--surface-2) 5px, var(--bg) 5px, var(--bg) 10px); border:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+.sync-row{display:flex; flex-direction:column; gap:6px; padding:12px 0; border-top:1px solid var(--border);}
+.sync-row:first-of-type{border-top:none;}
+.sync-row .who{font-size:13.5px; font-weight:700;}
+.sync-link{display:flex; gap:6px;}
+.sync-link input{flex:1; min-width:0; border:1px solid var(--border); border-radius:var(--radius-s); padding:8px 10px; font-size:12px; font-family:ui-monospace,Menlo,monospace; background:var(--surface-2); color:var(--text);}
+.sync-steps{margin:0; padding-left:18px; font-size:12.5px; color:var(--text-muted); display:flex; flex-direction:column; gap:3px;}
 .gc-more{font-size:11px; font-weight:700; color:var(--text-muted); padding:1px 4px;}
 /* schedule */
 .gc-sched{padding:8px 16px 16px;}
@@ -749,6 +755,7 @@ body{
           <button data-v="schedule">Schedule</button>
         </div>
         <button class="btn" id="gcTimeOffBtn">Block time off</button>
+        <button class="btn" id="gcSyncBtn">Sync to Google</button>
         <button class="btn" id="gcAvailBtn">Availability</button>
       </div>
       <div class="gc-reps" id="gcReps"></div>
@@ -2747,6 +2754,65 @@ function gcTimeOffMenu(){
   overlay.onclick = e=>{ if(e.target===overlay) closeModal(); };
 }
 
+function feedUrl(token){ return location.origin + '/api/calendar?t=' + token; }
+function newFeedToken(){ const b = new Uint8Array(24); crypto.getRandomValues(b); return [...b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+async function gcSyncMenu(){
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  const list = el('div',{});
+  const box = el('div',{class:'modal'},
+    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, 'Sync to Google Calendar'),
+        el('div',{class:'sheet-sub'}, 'Booked appointments copy to Google automatically.')),
+      el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
+    el('ol',{class:'sync-steps'},
+      el('li',{}, 'Copy your link below.'),
+      el('li',{}, 'On a computer, open Google Calendar.'),
+      el('li',{}, 'Next to "Other calendars" on the left, click + then "From URL".'),
+      el('li',{}, 'Paste the link and click "Add calendar".')),
+    list,
+    el('div',{class:'attrib'}, 'Google refreshes these every few hours. Keep links private: anyone with one can see those appointments.'));
+  modal.append(box);
+  overlay.hidden = false;
+  overlay.onclick = e=>{ if(e.target===overlay) closeModal(); };
+
+  const meName = (currentUser.name||'').trim();
+  const who = isRepUser() ? [meName] : [...gcRoster(), '*'];
+  async function load(){
+    list.innerHTML = '';
+    const { data, error } = await sb.from('calendar_feeds').select('*');
+    if(error){ console.error(error); list.append(el('div',{class:'warn-note'}, "Calendar sync isn't switched on yet. Ask Dylen to run the setup step.")); return; }
+    for(const name of who){
+      const rec = (data||[]).find(f=>f.rep.trim().toLowerCase()===name.trim().toLowerCase());
+      const label = name==='*' ? 'Whole team (all specialists)' : name;
+      const row = el('div',{class:'sync-row'}, el('div',{class:'who'}, label));
+      if(rec){
+        const inp = el('input',{type:'text', readonly:'readonly', value:feedUrl(rec.token), onclick:e=>e.target.select()});
+        row.append(el('div',{class:'sync-link'}, inp,
+          el('button',{class:'btn btn-primary', onclick:async ()=>{
+            try{ await navigator.clipboard.writeText(inp.value); showToast('Link copied'); }catch(e){ inp.select(); showToast('Press Ctrl+C to copy'); }
+          }}, 'Copy')));
+        row.append(el('button',{class:'link-btn', style:'align-self:flex-start', onclick:async ()=>{
+          if(!confirmReset(row)) return;
+          await sb.from('calendar_feeds').delete().eq('token', rec.token);
+          await make(name); load();
+        }}, 'Reset link (old one stops working)'));
+      } else {
+        row.append(el('button',{class:'btn', style:'align-self:flex-start', onclick:async ()=>{ await make(name); load(); }}, 'Create link'));
+      }
+      list.append(row);
+    }
+  }
+  function confirmReset(row){
+    if(row.dataset.confirm==='1') return true;
+    row.dataset.confirm = '1'; showToast('Click reset again to confirm'); return false;
+  }
+  async function make(name){
+    const { error } = await sb.from('calendar_feeds').insert({ token:newFeedToken(), rep:name, created_by:currentUser.id, created_at:Date.now() });
+    if(error){ console.error(error); showToast("Couldn't create that link"); }
+  }
+  load();
+}
+
 function gcStep(dir){
   const a = gcAnchor();
   if(gc.view==='day') gc.anchor = addDays(a, dir);
@@ -2760,6 +2826,7 @@ $('#gcNext').addEventListener('click', ()=>gcStep(1));
 $('#gcToday').addEventListener('click', ()=>{ gc.anchor = null; gcRender(); });
 $('#gcViewSeg').addEventListener('click', e=>{ const b = e.target.closest('button[data-v]'); if(!b) return; gc.view = b.dataset.v; gcRender(); });
 $('#gcTimeOffBtn').addEventListener('click', gcTimeOffMenu);
+$('#gcSyncBtn').addEventListener('click', gcSyncMenu);
 $('#gcAvailBtn').addEventListener('click', ()=>{
   const p = $('#availPanel'); p.hidden = !p.hidden;
   $('#gcAvailBtn').classList.toggle('btn-primary', !p.hidden);

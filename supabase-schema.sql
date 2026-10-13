@@ -118,3 +118,38 @@ create policy "brochures_storage_delete" on storage.objects for delete using (bu
 
 create policy "workorders_storage_select" on storage.objects for select using (bucket_id = 'work-orders' and auth.role() = 'authenticated');
 create policy "workorders_storage_insert" on storage.objects for insert with check (bucket_id = 'work-orders' and auth.role() = 'authenticated');
+
+-- ============ Google Calendar sync (private calendar feed links) ============
+-- Run once in Supabase → SQL Editor.
+create table if not exists calendar_feeds (
+  token text primary key,
+  rep text not null,               -- specialist name, or '*' for the whole team
+  created_by uuid references auth.users(id) on delete set null,
+  created_at bigint not null
+);
+alter table calendar_feeds enable row level security;
+drop policy if exists "feeds_select" on calendar_feeds;
+drop policy if exists "feeds_insert" on calendar_feeds;
+drop policy if exists "feeds_delete" on calendar_feeds;
+create policy "feeds_select" on calendar_feeds for select using (auth.role() = 'authenticated');
+create policy "feeds_insert" on calendar_feeds for insert with check (auth.role() = 'authenticated');
+create policy "feeds_delete" on calendar_feeds for delete using (auth.role() = 'authenticated');
+
+create or replace function public.calendar_feed(p_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare f calendar_feeds;
+begin
+  if p_token is null or length(p_token) < 32 then return null; end if;
+  select * into f from calendar_feeds where token = p_token;
+  if not found then return null; end if;
+  return jsonb_build_object('rep', f.rep, 'appts', coalesce((
+    select jsonb_agg(to_jsonb(l) - 'note_log' - 'created_by')
+    from leads l
+    where l.appt_date <> '' and l.appt_start <> '' and l.assigned_rep <> ''
+      and l.stage <> 'lost'
+      and l.appt_date >= to_char(now() - interval '60 days', 'YYYY-MM-DD')
+      and (f.rep = '*' or lower(trim(l.assigned_rep)) = lower(trim(f.rep)))
+  ), '[]'::jsonb));
+end $$;
+revoke all on function public.calendar_feed(text) from public;
+grant execute on function public.calendar_feed(text) to anon, authenticated;
