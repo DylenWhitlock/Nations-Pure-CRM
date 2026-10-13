@@ -319,6 +319,7 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .gc-mchip .dot{width:8px; height:8px; border-radius:50%; flex:none;}
 .gc-mchip .tm{color:var(--text-muted); flex:none;}
 .gc-mchip .nm{overflow:hidden; text-overflow:ellipsis; font-weight:600;}
+.gc-offchip{font-size:11px; font-weight:700; padding:2px 6px; border-radius:4px; color:var(--text-muted); background:repeating-linear-gradient(135deg, var(--surface-2), var(--surface-2) 5px, var(--bg) 5px, var(--bg) 10px); border:1px solid var(--border); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
 .gc-more{font-size:11px; font-weight:700; color:var(--text-muted); padding:1px 4px;}
 /* schedule */
 .gc-sched{padding:8px 16px 16px;}
@@ -747,6 +748,7 @@ body{
           <button data-v="month">Month</button>
           <button data-v="schedule">Schedule</button>
         </div>
+        <button class="btn" id="gcTimeOffBtn">Block time off</button>
         <button class="btn" id="gcAvailBtn">Availability</button>
       </div>
       <div class="gc-reps" id="gcReps"></div>
@@ -2558,7 +2560,7 @@ function gcTimeGrid(){
         const b = ev.block;
         col.append(el('button',{class:'gc-ev '+(ev.kind==='blocked'?'block':'open'), style:pos,
           onclick:()=>gcSlotMenu(b.rep, b.date, b.slot)},
-          el('div',{class:'t'}, ev.kind==='blocked' ? 'Blocked' : 'Opened'),
+          el('div',{class:'t'}, ev.kind==='blocked' ? (b.customer_name || 'Blocked') : 'Opened'),
           !isRepUser() ? el('div',{class:'s'}, b.rep) : null
         ));
       }
@@ -2597,6 +2599,15 @@ function gcMonth(){
         el('span',{class:'nm'}, l.name||'Customer')));
     });
     if(day.length>max) cell.append(el('div',{class:'gc-more'}, '+'+(day.length-max)+' more'));
+    const offByRep = {};
+    gc.blocks.filter(b=>b.date===ds && b.status==='blocked' && gcVisibleRep(b.rep)
+      && (!isRepUser() || (b.rep||'').trim().toLowerCase()===(currentUser.name||'').trim().toLowerCase()))
+      .forEach(b=>{ (offByRep[b.rep] = offByRep[b.rep] || []).push(b); });
+    Object.entries(offByRep).forEach(([r, list])=>{
+      const allDay = SLOTS.filter(sl=>isStandingOpen(ds, sl)).every(sl=>list.some(b=>b.slot===sl));
+      const label = (allDay ? 'Off' : 'Blocked')+(isRepUser() ? '' : ' · '+r.split(' ')[0]);
+      cell.append(el('div',{class:'gc-offchip', title:(list[0].customer_name||'Blocked')+' · '+r}, label));
+    });
     wrap.append(cell);
   }
   return wrap;
@@ -2649,6 +2660,93 @@ function gcSlotMenu(rep, date, slot){
   overlay.onclick = e=>{ if(e.target===overlay) closeModal(); };
 }
 
+function gcTimeOffMenu(){
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  const today = ymd(new Date());
+  const roster = gcRoster();
+  const repSel = el('select',{id:'to-rep'});
+  roster.forEach(n=>repSel.append(el('option',{value:n}, n)));
+  const me = roster.find(n=>n.trim().toLowerCase()===(currentUser.name||'').trim().toLowerCase());
+  if(me) repSel.value = me;
+  if(isRepUser()) repSel.disabled = true;
+  const from = el('input',{type:'date', id:'to-from', value:today});
+  const to = el('input',{type:'date', id:'to-to', value:today});
+  from.addEventListener('change', ()=>{ if(!to.value || to.value<from.value) to.value = from.value; });
+  const allDay = el('input',{type:'checkbox', id:'to-allday'}); allDay.checked = true;
+  const startSel = el('select',{id:'to-start'}), endSel = el('select',{id:'to-end'});
+  SLOTS.forEach(sl=>{ startSel.append(el('option',{value:sl}, slotLabel(sl))); endSel.append(el('option',{value:sl}, slotLabel(sl))); });
+  startSel.value = '08:00'; endSel.value = '12:00';
+  const timeRow = el('div',{class:'row2'},
+    el('div',{class:'field'}, el('label',{}, 'From time'), startSel),
+    el('div',{class:'field'}, el('label',{}, 'Through time'), endSel));
+  timeRow.hidden = true;
+  allDay.addEventListener('change', ()=>{ timeRow.hidden = allDay.checked; });
+  const reason = el('input',{type:'text', id:'to-reason', placeholder:'Vacation, doctor, training…', maxlength:'40'});
+  const msg = el('div',{class:'attrib'});
+
+  function pick(){
+    const rep = repSel.value, a = from.value, b = to.value || from.value;
+    if(!rep){ msg.textContent = 'Pick a water specialist.'; return null; }
+    if(!a || b<a){ msg.textContent = 'Check the dates.'; return null; }
+    const dates = []; for(let d=parseYmd(a); ymd(d)<=b; d=addDays(d,1)){ dates.push(ymd(d)); if(dates.length>92) break; }
+    if(dates.length>92){ msg.textContent = 'Keep it to 3 months or less at a time.'; return null; }
+    const slots = allDay.checked ? SLOTS.slice() : SLOTS.filter(sl=>sl>=startSel.value && sl<=endSel.value);
+    if(!slots.length){ msg.textContent = 'Check the times.'; return null; }
+    return { rep, a, b, dates, slots };
+  }
+  async function save(){
+    const p = pick(); if(!p) return;
+    msg.textContent = 'Saving…';
+    const { data: existing, error: e0 } = await sb.from('blocks').select('*').eq('rep', p.rep).gte('date', p.a).lte('date', p.b);
+    if(e0){ msg.textContent = "Couldn't reach the calendar. Try again."; return; }
+    const booked = (existing||[]).filter(x=>x.status==='booked' && p.slots.includes(x.slot));
+    const rows = [];
+    p.dates.forEach(dt=>p.slots.forEach(sl=>{
+      if(booked.some(x=>x.date===dt && x.slot===sl)) return;
+      rows.push({ id:blockDocId(p.rep,dt,sl), rep:p.rep, date:dt, slot:sl, status:'blocked',
+        customer_name: reason.value.trim() || 'Time off', created_by:currentUser.id, created_at:Date.now() });
+    }));
+    if(rows.length){
+      const { error } = await sb.from('blocks').upsert(rows);
+      if(error){ console.error(error); msg.textContent = "Couldn't save that. Try again."; return; }
+    }
+    closeModal(); gcLoadBlocks(true);
+    if(booked.length){
+      const list = booked.slice(0,3).map(x=>fmtApptShort(x.date,x.slot)).join(', ');
+      showToast('Blocked. '+booked.length+' booked appointment'+(booked.length>1?'s':'')+' still on the calendar: '+list);
+    } else showToast('Time off blocked');
+  }
+  async function clear(){
+    const p = pick(); if(!p) return;
+    msg.textContent = 'Removing…';
+    const { error } = await sb.from('blocks').delete().eq('rep', p.rep).eq('status','blocked')
+      .gte('date', p.a).lte('date', p.b).in('slot', p.slots);
+    if(error){ console.error(error); msg.textContent = "Couldn't remove that. Try again."; return; }
+    closeModal(); gcLoadBlocks(true); showToast('Time off removed');
+  }
+
+  modal.append(el('div',{class:'modal'},
+    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, 'Block time off'),
+        el('div',{class:'sheet-sub'}, 'Blocked times can’t be booked.')),
+      el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
+    el('div',{class:'field'}, el('label',{}, 'Water specialist'), repSel),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'From'), from),
+      el('div',{class:'field'}, el('label',{}, 'Through'), to)),
+    el('label',{class:'toggle-row'}, el('div',{}, el('div',{class:'lbl'}, 'All day')),
+      el('span',{class:'switch'}, allDay, el('span',{class:'track'}, el('span',{class:'thumb'})))),
+    timeRow,
+    el('div',{class:'field'}, el('label',{}, 'Reason (optional)'), reason),
+    msg,
+    el('div',{class:'modal-actions'},
+      el('button',{class:'link-btn', onclick:clear}, 'Remove time off'),
+      el('button',{class:'btn btn-primary', onclick:save}, 'Block it'))
+  ));
+  overlay.hidden = false;
+  overlay.onclick = e=>{ if(e.target===overlay) closeModal(); };
+}
+
 function gcStep(dir){
   const a = gcAnchor();
   if(gc.view==='day') gc.anchor = addDays(a, dir);
@@ -2661,6 +2759,7 @@ $('#gcPrev').addEventListener('click', ()=>gcStep(-1));
 $('#gcNext').addEventListener('click', ()=>gcStep(1));
 $('#gcToday').addEventListener('click', ()=>{ gc.anchor = null; gcRender(); });
 $('#gcViewSeg').addEventListener('click', e=>{ const b = e.target.closest('button[data-v]'); if(!b) return; gc.view = b.dataset.v; gcRender(); });
+$('#gcTimeOffBtn').addEventListener('click', gcTimeOffMenu);
 $('#gcAvailBtn').addEventListener('click', ()=>{
   const p = $('#availPanel'); p.hidden = !p.hidden;
   $('#gcAvailBtn').classList.toggle('btn-primary', !p.hidden);
