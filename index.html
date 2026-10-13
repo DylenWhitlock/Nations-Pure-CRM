@@ -360,7 +360,7 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .info-row a{color:var(--accent-strong); font-weight:700; text-decoration:none;}
 .quick-actions{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
 .quick-actions .btn{justify-content:center; text-decoration:none;}
-.outcome-row{display:grid; grid-template-columns:repeat(3,1fr); gap:6px;}
+.outcome-row{display:grid; grid-template-columns:repeat(2,1fr); gap:6px;}
 .outcome-row .btn{justify-content:center; padding:9px 8px;}
 .outcome-row .btn.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong);}
 .outcome-row .btn.on.won{background:var(--success-soft); border-color:var(--success); color:var(--success);}
@@ -525,7 +525,7 @@ body{
 .board{grid-auto-columns:284px; gap:14px;}
 .col{--stage:var(--accent); --stage-soft:var(--accent-soft); background:var(--surface-3); border:1px solid var(--border); border-radius:var(--radius-m); padding:8px; gap:8px; position:relative;}
 .col[data-stage=scheduled]{--stage:var(--indigo); --stage-soft:var(--indigo-soft);}
-.col[data-stage=quoted]{--stage:var(--warning); --stage-soft:var(--warning-soft);}
+.col[data-stage=awaiting]{--stage:var(--warning); --stage-soft:var(--warning-soft);}
 .col[data-stage=won]{--stage:var(--success); --stage-soft:var(--success-soft);}
 .col[data-stage=lost]{--stage:var(--danger); --stage-soft:var(--danger-soft);}
 .col-head{padding:6px 6px 4px;}
@@ -933,8 +933,8 @@ body{
 <script>
 const STAGES = [
   {id:'new', label:'New Lead', dot:''},
+  {id:'awaiting', label:'Awaiting Response', dot:''},
   {id:'scheduled', label:'In-Home Scheduled', dot:''},
-  {id:'quoted', label:'Quoted', dot:''},
   {id:'won', label:'Won', dot:'success'},
   {id:'lost', label:'Lost', dot:'danger'},
 ];
@@ -1094,7 +1094,7 @@ $('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
 /* ================= DATA MAPPING ================= */
 function mapLead(r){
   return {
-    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, leadSource:r.lead_source||'', need:r.need, stage:r.stage,
+    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, leadSource:r.lead_source||'', need:r.need, stage:(r.stage==='quoted' ? 'lost' : r.stage),
     salePrice:r.sale_price, systemName:r.system_name,
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
@@ -2073,7 +2073,7 @@ async function bookAppointment(lead, rep, date, slot, addr){
     if(e1) throw e1;
     const upd = { assigned_rep:rep, appt_date:date, appt_start:slot, updated_at:Date.now() };
     if(addr !== (lead.address||'').trim()){ upd.address = addr; lead.address = addr; }
-    if(lead.stage==='new') upd.stage = 'scheduled';
+    if(lead.stage==='new' || lead.stage==='awaiting') upd.stage = 'scheduled';
     const { error: e2 } = await sb.from('leads').update(upd).eq('id', lead.id);
     if(e2) throw e2;
     lead.assignedRep = rep; lead.apptDate = date; lead.apptStart = slot; lead.updatedAt = upd.updated_at;
@@ -2850,7 +2850,7 @@ function openApptSheet(id){
 
   const outcome = el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Outcome'));
   const row = el('div',{class:'outcome-row'});
-  [['quoted','Quoted'],['won','Won'],['lost','Lost']].forEach(([id,label])=>{
+  [['won','Won'],['lost','Lost']].forEach(([id,label])=>{
     row.append(el('button',{class:'btn '+id+(lead.stage===id?' on':''), onclick:async ()=>{
       if(lead.stage===id) return;
       await changeStage(lead, id);
@@ -3073,9 +3073,8 @@ function inRange(ts, range){
 }
 function renderRepAnalytics(){
   const mine = chanLeads(myLeads());
-  const appts = mine.filter(l=>l.apptDate && (l.apptDate<todayStr() || ['quoted','won','lost'].includes(l.stage)) && inRange(new Date(l.apptDate+'T12:00:00').getTime(), repRange));
+  const appts = mine.filter(l=>l.apptDate && (l.apptDate<todayStr() || ['won','lost'].includes(l.stage)) && inRange(new Date(l.apptDate+'T12:00:00').getTime(), repRange));
   const won = mine.filter(l=>l.stage==='won' && inRange(l.updatedAt||l.createdAt, repRange));
-  const quoted = mine.filter(l=>l.stage==='quoted' && inRange(l.updatedAt||l.createdAt, repRange));
   const revenue = won.reduce((s,l)=>s+(Number(l.salePrice)||0),0);
   const close = appts.length ? Math.round(won.length/appts.length*100) : 0;
   const upcoming = mine.filter(l=>l.apptDate && l.apptDate>todayStr()).length;
@@ -3086,7 +3085,6 @@ function renderRepAnalytics(){
     [appts.length ? close+'%' : '—', 'Close rate'],
     [won.length ? fmtMoney(revenue/won.length) : '—', 'Avg sale'],
     [String(appts.length), 'Appointments run'],
-    [String(quoted.length), 'Open quotes'],
     [String(upcoming), 'Upcoming appts'],
   ].forEach(([v,l])=>kpis.append(el('div',{class:'kpi'}, el('div',{class:'kpi-v'}, v), el('div',{class:'kpi-l'}, l))));
   const wins = $('#repWins'); wins.innerHTML = '';
