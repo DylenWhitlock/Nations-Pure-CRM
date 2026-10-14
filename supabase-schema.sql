@@ -128,6 +128,7 @@ create table if not exists calendar_feeds (
   created_at bigint not null
 );
 alter table calendar_feeds enable row level security;
+grant select, insert, delete on calendar_feeds to authenticated;
 drop policy if exists "feeds_select" on calendar_feeds;
 drop policy if exists "feeds_insert" on calendar_feeds;
 drop policy if exists "feeds_delete" on calendar_feeds;
