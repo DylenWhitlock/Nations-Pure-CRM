@@ -1817,7 +1817,22 @@ function renderWoList(){
 $('#newWoBtn').addEventListener('click', ()=>openWorkOrder(null));
 
 /* ================= SCHEDULING / CALENDAR ================= */
-const SLOTS = ['08:00','09:00','10:00','11:00','12:00','13:00','14:00','15:00','16:00','17:00','18:00'];
+// Appointment start times every 30 minutes, 8:00 AM – 6:00 PM
+const SLOTS = [];
+for(let m=8*60; m<=18*60; m+=30) SLOTS.push(String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0'));
+// Before half-hour slots existed, a blocked/opened :00 time covered the whole hour.
+// Those older records also cover the :30 that follows them.
+const HALF_HOUR_SLOTS_SINCE = Date.UTC(2026,9,19,18,45);
+function expandLegacyBlocks(rows){
+  const out = (rows||[]).slice();
+  (rows||[]).forEach(b=>{
+    if((b.status==='blocked'||b.status==='open') && /:00$/.test(b.slot||'') && Number(b.created_at||0) < HALF_HOUR_SLOTS_SINCE){
+      const half = b.slot.slice(0,3)+'30';
+      if(!rows.some(x=>x.rep===b.rep && x.date===b.date && x.slot===half)) out.push({...b, id:null, slot:half, parentSlot:b.slot});
+    }
+  });
+  return out;
+}
 function slotLabel(s){
   const [h,m] = s.split(':').map(Number);
   const ap = h<12 ? 'AM' : 'PM';
@@ -1835,8 +1850,8 @@ function isWeekdayDate(dateStr){
 }
 function isStandingOpen(dateStr, slot){
   if(!isWeekdayDate(dateStr)) return false;
-  const h = parseInt(slot.split(':')[0],10);
-  return h>=8 && h<=16;
+  const t = slotToMinutes(slot);
+  return t>=8*60 && t<=16*60;
 }
 function blockDocId(rep, date, slot){
   const repSlug = (rep||'unassigned').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'unassigned';
@@ -1889,13 +1904,23 @@ async function computeTravelBlocks(rep, date, blocksMap, thisAddr, excludeLeadId
     return { minutes: slotToMinutes(s), slot:s, addr: (leadObj?.address||'').trim(), name: blocksMap[s].customerName || leadObj?.name || 'a customer' };
   });
   const blocked = {};
+  // a start time can't run into blocked-off time later that day
+  const offTimes = SLOTS.filter(s=>blocksMap[s] && blocksMap[s].status==='blocked').map(slotToMinutes);
+  for(const slot of SLOTS){
+    if(blocksMap[slot]) continue;
+    const t = slotToMinutes(slot);
+    const hit = offTimes.find(o=>o>t && t + rule.inHome > o);
+    if(hit!=null) blocked[slot] = 'Runs into blocked-off time at '+slotLabel(String(Math.floor(hit/60)).padStart(2,'0')+':'+String(hit%60).padStart(2,'0'));
+  }
   if(booked.length===0) return { blocked };
   const withAddr = booked.filter(b=>b.addr);
   const drive = withAddr.length ? await driveMatrix([thisAddr, ...withAddr.map(b=>b.addr)]) : ()=>null;
   for(const slot of SLOTS){
-    if(blocksMap[slot]) continue;
+    if(blocksMap[slot] || blocked[slot]) continue;
     const t = slotToMinutes(slot);
     for(const b of booked){
+      if(b.minutes < t && b.minutes + rule.inHome > t){ blocked[slot] = 'Overlaps the '+slotLabel(b.slot)+' appointment'; break; }
+      if(b.minutes > t && t + rule.inHome > b.minutes){ blocked[slot] = 'Overlaps the '+slotLabel(b.slot)+' appointment'; break; }
       if(b.minutes < t){            // they leave an earlier appointment and drive here
         if(!b.addr){ blocked[slot] = "Can't calculate — the "+slotLabel(b.slot)+' appointment has no address'; break; }
         const m = drive(b.addr, thisAddr);
@@ -1920,7 +1945,7 @@ async function loadBlocksFor(rep, date, onChange){
   const { data, error } = await sb.from('blocks').select('*').eq('rep', rep).eq('date', date);
   if(error){ console.error(error); onChange({}); return; }
   const map = {};
-  data.forEach(v=>{ map[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name }; });
+  expandLegacyBlocks(data).forEach(v=>{ map[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name, parentSlot:v.parentSlot }; });
   onChange(map);
 }
 
@@ -1944,10 +1969,10 @@ function renderSlotList(container, rep, date, blocksMap, mode, onBook, travelBlo
       }
     } else if(rec && rec.status==='blocked'){
       cls = 'blocked'; statusText = 'Blocked off';
-      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>unblockSlot(rep,date,slot)}, 'Unblock');
+      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>unblockSlot(rep,date,rec.parentSlot||slot)}, 'Unblock');
     } else if(rec && rec.status==='open'){
       cls = 'available'; statusText = 'Available (opened)';
-      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>closeSlotFn(rep,date,slot)}, 'Close');
+      if(mode==='manage') action = el('button',{class:'btn', onclick:()=>closeSlotFn(rep,date,rec.parentSlot||slot)}, 'Close');
       if(mode==='book') action = el('button',{class:'btn btn-primary', onclick:()=>onBook(slot)}, 'Book');
     } else if(isStandingOpen(date, slot)){
       cls = 'available'; statusText = 'Available';
@@ -2439,7 +2464,7 @@ async function gcLoadBlocks(force){
   if(!force && key===gc.blocksKey && gc.blocks) { gcRender(true); }
   const { data, error } = await sb.from('blocks').select('*').gte('date', ymd(r.start)).lte('date', ymd(r.end));
   if(error){ console.error(error); return; }
-  gc.blocks = data || []; gc.blocksKey = key;
+  gc.blocks = expandLegacyBlocks(data || []); gc.blocksKey = key;
   gcRender(true);
 }
 function gcRangeLabel(){
@@ -2519,11 +2544,13 @@ function gcTimeGrid(){
     }
     for(let h=GC_START; h<GC_END; h++){
       col.append(el('div',{class:'gc-hourline', style:`top:${(h-GC_START)*GC_HOUR_PX}px`}));
-      const slot = String(h).padStart(2,'0')+':00';
-      if(rosterOne && SLOTS.includes(slot)){
-        col.append(el('div',{class:'gc-slot', title:'Manage '+slotLabel(slot), style:`top:${(h-GC_START)*GC_HOUR_PX}px;height:${GC_HOUR_PX}px`,
-          onclick:()=>gcSlotMenu(rosterOne, ds, slot)}));
-      }
+      [0,30].forEach(mi=>{
+        const slot = String(h).padStart(2,'0')+':'+String(mi).padStart(2,'0');
+        if(rosterOne && SLOTS.includes(slot)){
+          col.append(el('div',{class:'gc-slot', title:'Manage '+slotLabel(slot), style:`top:${(h-GC_START+mi/60)*GC_HOUR_PX}px;height:${GC_HOUR_PX/2}px`,
+            onclick:()=>gcSlotMenu(rosterOne, ds, slot)}));
+        }
+      });
     }
     // events: appointments + blocks/opened times
     const evs = [];
@@ -2534,7 +2561,7 @@ function gcTimeGrid(){
     gc.blocks.filter(b=>b.date===ds && b.status!=='booked' && gcVisibleRep(b.rep)
       && (!isRepUser() || (b.rep||'').trim().toLowerCase()===(currentUser.name||'').trim().toLowerCase())).forEach(b=>{
       const [hh,mm] = (b.slot||'00:00').split(':').map(Number);
-      const s = hh*60+mm; evs.push({kind:b.status, block:b, rep:b.rep, s, e:s+60});
+      const s = hh*60+mm; evs.push({kind:b.status, block:b, rep:b.rep, s, e:s+30});
     });
     // lay out overlapping events side by side
     evs.sort((a,b)=>a.s-b.s || b.e-a.e);
@@ -2652,7 +2679,7 @@ function gcSlotMenu(rep, date, slot){
   const overlay = $('#overlay'), modal = $('#modal');
   modal.innerHTML = '';
   const when = parseYmd(date).toLocaleDateString(undefined,{weekday:'long', month:'short', day:'numeric'})+' · '+slotLabel(slot);
-  const done = async fn=>{ await fn(rep,date,slot); closeModal(); gcLoadBlocks(true); };
+  const done = async fn=>{ await fn(rep,date,(rec&&rec.parentSlot)||slot); closeModal(); gcLoadBlocks(true); };
   const opts = el('div',{class:'opt'});
   if(rec && rec.status==='blocked') opts.append(el('button',{class:'btn btn-primary', onclick:()=>done(unblockSlot)}, 'Unblock this time'));
   else if(rec && rec.status==='open') opts.append(el('button',{class:'btn btn-primary', onclick:()=>done(closeSlotFn)}, 'Close this time again'));
