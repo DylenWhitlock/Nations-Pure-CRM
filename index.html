@@ -225,6 +225,25 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .sched-box{border:1px solid var(--border); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:10px;}
 .sched-current{background:var(--accent-soft); color:var(--accent-strong); border-radius:9px; padding:9px 11px; font-size:12.5px; font-weight:600; display:flex; justify-content:space-between; align-items:center; gap:8px;}
 .sched-row{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.sched-row .field[hidden]{display:none;}
+.sched-row:has(.field[hidden]){grid-template-columns:1fr;}
+.cmp-seg{align-self:flex-start;}
+.cmp-top{border:1px solid var(--accent); background:var(--accent-soft); border-radius:10px; padding:10px; display:flex; flex-direction:column; gap:6px; margin-bottom:10px;}
+.cmp-top-h{font-size:11px; font-weight:800; letter-spacing:.04em; text-transform:uppercase; color:var(--accent-strong);}
+.cmp-pick{display:flex; align-items:center; gap:10px; width:100%; text-align:left; background:var(--surface); border:1px solid var(--border); border-radius:8px; padding:9px 10px; font:inherit; color:inherit; cursor:pointer;}
+.cmp-pick:hover{border-color:var(--accent);}
+.cmp-pick-main{flex:1; min-width:0; display:flex; flex-direction:column; gap:1px; font-size:13px;}
+.cmp-book{flex:none; font-size:12px; font-weight:700; color:#fff; background:var(--accent); border-radius:6px; padding:6px 12px;}
+.cmp-dot{width:9px; height:9px; border-radius:50%; flex:none;}
+.cmp-note{display:block; font-size:11.5px; color:var(--text-muted); font-weight:500;}
+.cmp-list{border:1px solid var(--border); border-radius:10px; overflow:hidden; max-height:420px; overflow-y:auto; background:var(--surface);}
+.cmp-row{display:grid; grid-template-columns:66px 1fr; border-top:1px solid var(--border);}
+.cmp-row:first-child{border-top:none;}
+.cmp-time{padding:12px 8px; font-size:11px; font-weight:700; color:var(--text-muted); text-align:right; border-right:1px solid var(--border); background:var(--surface-2); white-space:nowrap;}
+.cmp-chips{padding:6px; display:flex; flex-wrap:wrap; gap:6px;}
+.cmp-chip{display:flex; align-items:center; gap:8px; text-align:left; background:var(--success-soft); border:1px solid transparent; border-radius:8px; padding:7px 10px; font:inherit; font-size:12.5px; color:inherit; cursor:pointer; flex:1 1 150px;}
+.cmp-chip:hover{border-color:var(--success);}
+.cmp-chip.best{border-color:var(--success);}
 
 /* traditional day-view timeline (shared by scheduler + calendar tab) */
 .cal-timeline{border:1px solid var(--border); border-radius:10px; overflow:hidden; max-height:420px; overflow-y:auto; background:var(--surface);}
@@ -2019,6 +2038,7 @@ function renderSlotList(container, rep, date, blocksMap, mode, onBook, travelBlo
       cls = 'closed'; statusText = 'Not offered (evening/Saturday)';
       if(mode==='manage') action = el('button',{class:'btn', onclick:()=>openSlotFn(rep,date,slot)}, 'Open this time');
     }
+    if(mode==='book' && cls==='available' && isPastSlot(date, slot)){ cls = 'closed'; statusText = 'Already passed'; action = null; }
     if(mode==='book' && cls==='available'){
       if(travel.status==='pending'){ cls = 'travel'; statusText = 'Checking drive time…'; action = null; }
       else if(travel.status==='noaddr'){ cls = 'travel'; statusText = "Add the customer's address to see open times"; action = null; }
@@ -2067,6 +2087,88 @@ $('#calRep').addEventListener('input', renderCalendarTab);
 $('#calDate').addEventListener('input', renderCalendarTab);
 
 /* ---- scheduler inside lead modal ---- */
+/* ---- "All reps" booking view: every specialist's open times side by side, quickest first ---- */
+function nowMinutesIfToday(date){ if(date!==todayStr()) return -1; const n = new Date(); return n.getHours()*60+n.getMinutes(); }
+function isPastSlot(date, slot){ const n = nowMinutesIfToday(date); return n>=0 && slotToMinutes(slot) < n+15; }
+function minsLabel(t){ return slotLabel(String(Math.floor(t/60)).padStart(2,'0')+':'+String(t%60).padStart(2,'0')); }
+async function loadAllRepBlocks(date){
+  const { data, error } = await sb.from('blocks').select('*').eq('date', date);
+  if(error) throw error;
+  const byRep = {};
+  expandLegacyBlocks(data).forEach(v=>{
+    const k = (v.rep||'').trim().toLowerCase();
+    (byRep[k] = byRep[k] || {})[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name, parentSlot:v.parentSlot };
+  });
+  return byRep;
+}
+// Returns [{slot, reps:[{rep, mins, note}]}] — only times at least one specialist can take, reps sorted quickest first.
+async function compareReps(date, addr, excludeLeadId){
+  const byRep = await loadAllRepBlocks(date);
+  const reps = REP_SUGGESTIONS.filter(r=>!isFormerRep(r));
+  const info = reps.map(rep=>{
+    const map = byRep[rep.trim().toLowerCase()] || {};
+    const booked = SLOTS.filter(s=>map[s] && map[s].status==='booked' && map[s].leadId!==excludeLeadId).map(s=>{
+      const lo = leads.find(l=>l.id===map[s].leadId);
+      return { t:slotToMinutes(s), slot:s, addr:(lo?.address||'').trim(), city:cityFromAddress(lo?.address||'') };
+    });
+    return { rep, map, booked };
+  });
+  // one Google lookup for every address involved that day
+  const addrs = [addr, ...info.flatMap(i=>i.booked.map(b=>b.addr).filter(Boolean))];
+  const drive = addrs.length>1 ? await driveMatrix(addrs.slice(0,20)) : ()=>null;
+  const travel = {};
+  for(const i of info) travel[i.rep] = (await computeTravelBlocks(i.rep, date, i.map, addr, excludeLeadId)).blocked;
+  const out = [];
+  for(const slot of SLOTS){
+    if(isPastSlot(date, slot)) continue;
+    const t = slotToMinutes(slot);
+    const opts = [];
+    for(const i of info){
+      const rec = i.map[slot];
+      const open = rec ? rec.status==='open' : isStandingOpen(date, slot);
+      if(!open || travel[i.rep][slot]) continue;
+      const prev = i.booked.filter(b=>b.t<t).sort((a,b)=>b.t-a.t)[0];
+      const next = i.booked.filter(b=>b.t>t).sort((a,b)=>a.t-b.t)[0];
+      let mins = null, note;
+      if(prev && prev.addr){ mins = drive(prev.addr, addr); note = (mins!=null ? mins+' min' : '?')+' from '+slotLabel(prev.slot)+(prev.city?' in '+prev.city:''); }
+      else if(next && next.addr){ const m = drive(addr, next.addr); note = 'First stop · '+(m!=null ? m+' min to ' : 'then ')+slotLabel(next.slot)+(next.city?' in '+next.city:''); }
+      else note = 'Nothing else booked that day';
+      opts.push({ rep:i.rep, mins, note });
+    }
+    if(!opts.length) continue;
+    opts.sort((a,b)=> (a.mins==null)-(b.mins==null) || (a.mins||0)-(b.mins||0));
+    out.push({ slot, reps:opts });
+  }
+  return out;
+}
+function renderCompare(container, date, rows, onBook){
+  container.innerHTML = '';
+  if(new Date(date+'T00:00:00').getDay()===0){ container.append(el('div',{class:'empty-note'}, "Nation's Pure doesn't book Sundays")); return; }
+  if(!rows.length){ container.append(el('div',{class:'empty-note'}, 'No one has an open time that day')); return; }
+  // quickest: shortest drive from an appointment they're already at nearby
+  const seen = new Set();
+  const near = rows.flatMap(r=>r.reps.filter(o=>o.mins!=null).map(o=>({...o, slot:r.slot})))
+    .sort((a,b)=>a.mins-b.mins || a.slot.localeCompare(b.slot))
+    .filter(o=>!seen.has(o.rep) && seen.add(o.rep));
+  if(near.length){
+    const top = el('div',{class:'cmp-top'}, el('div',{class:'cmp-top-h'}, 'Quickest to get there'));
+    near.forEach(o=>top.append(el('button',{class:'cmp-pick', onclick:()=>onBook(o.rep, o.slot)},
+      el('span',{class:'cmp-dot', style:'background:'+repColor(o.rep)}),
+      el('span',{class:'cmp-pick-main'}, el('b',{}, o.rep.split(' ')[0]+' · '+slotLabel(o.slot)), el('span',{class:'cmp-note'}, o.note)),
+      el('span',{class:'cmp-book'}, 'Book'))));
+    container.append(top);
+  }
+  const list = el('div',{class:'cmp-list'});
+  rows.forEach(r=>{
+    const chips = el('div',{class:'cmp-chips'});
+    r.reps.forEach((o,k)=>chips.append(el('button',{class:'cmp-chip'+(k===0 && o.mins!=null && r.reps.length>1?' best':''), title:'Book '+o.rep+' at '+slotLabel(r.slot), onclick:()=>onBook(o.rep, r.slot)},
+      el('span',{class:'cmp-dot', style:'background:'+repColor(o.rep)}),
+      el('span',{}, el('b',{}, o.rep.split(' ')[0]), el('span',{class:'cmp-note'}, o.note)))));
+    list.append(el('div',{class:'cmp-row'}, el('div',{class:'cmp-time'}, slotLabel(r.slot)), chips));
+  });
+  container.append(list);
+}
+
 function buildSchedBox(lead){
   const box = el('div',{class:'sched-box'}, el('div',{class:'lbl', style:'font-size:12px;font-weight:700;color:var(--text-muted);'}, 'Appointment'));
   if(lead.apptDate && lead.apptStart){
@@ -2084,9 +2186,32 @@ function buildSchedBox(lead){
   dateI.value = new Date().toISOString().slice(0,10);
   const slotsEl = el('div',{id:'sch-slots'});
   const currentAddr = ()=>((document.getElementById('f-addr')?.value) || lead.address || '').trim();
+  const canCompare = currentUser.role!=='rep';
+  let mode = canCompare && !lead.assignedRep ? 'all' : 'one';
+  const modeSeg = el('div',{class:'seg cmp-seg'});
+  const repField = el('div',{class:'field'}, el('label',{}, 'Water specialist'), repI);
+  if(canCompare){
+    [['all','All reps'],['one','One rep']].forEach(([v,t])=>{
+      const b = el('button',{type:'button', class:v===mode?'on':''}, t);
+      b.addEventListener('click', ()=>{ mode = v; modeSeg.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b)); repField.hidden = mode==='all'; refresh(); });
+      modeSeg.append(b);
+    });
+  }
+  repField.hidden = mode==='all';
   let runId = 0;
   const refresh = ()=>{
-    const rep = repI.value.trim(), date = dateI.value, addr = currentAddr(), my = ++runId;
+    const date = dateI.value, addr = currentAddr();
+    if(mode==='all'){
+      const my = ++runId;
+      if(!date){ slotsEl.innerHTML = ''; return; }
+      if(!addr){ slotsEl.innerHTML = ''; slotsEl.append(el('div',{class:'empty-note'}, "Add the customer's address to see who can get there")); return; }
+      slotsEl.innerHTML = ''; slotsEl.append(el('div',{class:'empty-note'}, 'Checking every rep’s drive times…'));
+      compareReps(date, addr, lead.id).then(rows=>{
+        if(my===runId) renderCompare(slotsEl, date, rows, (rep, slot)=>bookAppointment(lead, rep, date, slot, addr));
+      }).catch(e=>{ console.error(e); if(my===runId){ slotsEl.innerHTML = ''; slotsEl.append(el('div',{class:'empty-note'}, "Can't book — drive times couldn't be calculated. Try again in a moment.")); } });
+      return;
+    }
+    const rep = repI.value.trim(), my = ++runId;
     const onBook = slot=>bookAppointment(lead, rep, date, slot, addr);
     loadBlocksFor(rep, date, async map=>{
       if(my!==runId) return;
@@ -2102,9 +2227,10 @@ function buildSchedBox(lead){
   dateI.addEventListener('input', refresh);
   let addrTimer = null;
   setTimeout(()=>{ const a = document.getElementById('f-addr'); if(a) a.addEventListener('input', ()=>{ clearTimeout(addrTimer); addrTimer = setTimeout(refresh, 700); }); }, 0);
+  if(canCompare) box.append(modeSeg);
   box.append(
     el('div',{class:'sched-row'},
-      el('div',{class:'field'}, el('label',{}, 'Water specialist'), repI),
+      repField,
       el('div',{class:'field'}, el('label',{}, 'Date'), dateI)
     ),
     slotsEl
