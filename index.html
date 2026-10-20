@@ -866,6 +866,7 @@ body{
           <h2>Team performance</h2>
           <div class="panel-sub">Live — updates automatically as leads move and deals close</div>
         </div>
+        <button class="btn" id="exportXlsxBtn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg>Export to Excel</button>
       </div>
       <div class="stats-row" id="analyticsKpis"></div>
     </div>
@@ -3156,6 +3157,278 @@ $('#srcRangeSeg').addEventListener('click', e=>{
   $('#srcRangeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
   renderSourceTable();
 });
+
+/* ================= EXCEL EXPORT ================= */
+let exceljsLoading = null;
+function loadExcelJS(){
+  if(window.ExcelJS) return Promise.resolve(window.ExcelJS);
+  if(!exceljsLoading) exceljsLoading = new Promise((res, rej)=>{
+    const s = document.createElement('script');
+    s.src = 'https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js';
+    s.onload = ()=>res(window.ExcelJS);
+    s.onerror = ()=>{ exceljsLoading = null; rej(new Error('load')); };
+    document.head.append(s);
+  });
+  return exceljsLoading;
+}
+function exportPeriod(kind, from, to){
+  const now = new Date(), y = now.getFullYear(), m = now.getMonth();
+  const d = (yy,mm,dd)=>ymd(new Date(yy,mm,dd));
+  switch(kind){
+    case 'month': return { a:d(y,m,1), b:d(y,m+1,0), label:now.toLocaleDateString('en-US',{month:'long', year:'numeric'}) };
+    case 'lastmonth': { const s = new Date(y,m-1,1); return { a:d(y,m-1,1), b:d(y,m,0), label:s.toLocaleDateString('en-US',{month:'long', year:'numeric'}) }; }
+    case 'quarter': { const q = Math.floor(m/3); return { a:d(y,q*3,1), b:d(y,q*3+3,0), label:'Q'+(q+1)+' '+y }; }
+    case 'year': return { a:d(y,0,1), b:d(y,11,31), label:String(y) };
+    case 'lastyear': return { a:d(y-1,0,1), b:d(y-1,11,31), label:String(y-1) };
+    case 'all': return { a:'0000-01-01', b:'9999-12-31', label:'All time' };
+    default: {
+      const f = x=>parseYmd(x).toLocaleDateString('en-US',{month:'short', day:'numeric', year:'numeric'});
+      return { a:from, b:to, label:f(from)+' – '+f(to) };
+    }
+  }
+}
+async function fetchAllLeadsForExport(){
+  const out = [];
+  for(let i=0; i<50; i++){
+    const { data, error } = await sb.from('leads').select('*').order('created_at',{ascending:true}).range(i*1000, i*1000+999);
+    if(error) throw error;
+    out.push(...data.map(mapLead));
+    if(data.length<1000) break;
+  }
+  return out;
+}
+async function buildSalesWorkbook(all, p, chan){
+  const ExcelJS = await loadExcelJS();
+  const today = todayStr();
+  const tsDay = ts=> ts ? ymd(new Date(ts)) : '';
+  const inP = ds=> !!ds && ds>=p.a && ds<=p.b;
+  const leadsC = all.filter(l=> chan==='both' || leadChannel(l)===chan);
+  const wonDay = l=> tsDay(l.updatedAt||l.createdAt);
+  const ran = l=> !!l.apptDate && l.apptDate<=today && inP(l.apptDate);
+  const isWon = l=> l.stage==='won' && inP(wonDay(l));
+  const isLost = l=> l.stage==='lost' && inP(tsDay(l.updatedAt||l.createdAt));
+  const price = l=> Number(l.salePrice)||0;
+  const chanLabel = chan==='both' ? 'Installs + Service' : chan==='service' ? 'Service' : 'Installs';
+  const stageLabel = id=> (STAGES.find(s=>s.id===id)||{}).label || id || '';
+  const xlDate = ds=>{ const [yy,mm,dd] = ds.split('-').map(Number); return new Date(Date.UTC(yy,mm-1,dd)); };
+  const dateCell = ds=> ds ? xlDate(ds) : null;
+  const tsCell = ts=> ts ? xlDate(tsDay(ts)) : null;
+
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "Nation's Pure"; wb.created = new Date();
+  const NAVY = 'FF1F3A5F', LIGHT = 'FFEEF2F7';
+  const MONEY = '"$"#,##0', PCT = '0%', DATE = 'm/d/yyyy';
+  function header(ws, rowNum){
+    const r = ws.getRow(rowNum);
+    r.eachCell((c,i)=>{ c.font = { bold:true, color:{argb:'FFFFFFFF'} }; c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:NAVY} }; c.alignment = { vertical:'middle', horizontal: i===1 ? 'left' : 'center' }; });
+    r.height = 20;
+  }
+  function titleBlock(ws, title, cols){
+    ws.mergeCells(1,1,1,cols); ws.getCell(1,1).value = title; ws.getCell(1,1).font = { bold:true, size:15 };
+    ws.mergeCells(2,1,2,cols); ws.getCell(2,1).value = p.label+'  ·  '+chanLabel; ws.getCell(2,1).font = { color:{argb:'FF555555'} };
+  }
+  function totalsRow(ws, r){ ws.getRow(r).eachCell(c=>{ c.font = { bold:true }; c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:LIGHT} }; c.border = { top:{style:'thin'} }; }); }
+  const col = n=> String.fromCharCode(64+n);
+
+  /* ---- Summary by rep ---- */
+  const ws1 = wb.addWorksheet('Sales Summary', { views:[{ showGridLines:false }] });
+  titleBlock(ws1, "Nation's Pure — Sales Performance", 8);
+  ws1.columns = [{width:22},{width:16},{width:15},{width:10},{width:10},{width:12},{width:15},{width:13}];
+  const roster = Array.from(new Set([...REP_SUGGESTIONS, ...leadsC.map(l=>l.assignedRep).filter(Boolean)]));
+  const H1 = 4;
+  ws1.getRow(H1).values = ['Water specialist','Leads assigned','Appointments','Won','Lost','Close rate','Revenue','Avg sale'];
+  header(ws1, H1);
+  let r = H1+1;
+  [...roster, ''].forEach(rep=>{
+    const mine = leadsC.filter(l=>(l.assignedRep||'')===rep);
+    const row = [rep||'Unassigned', mine.filter(l=>inP(tsDay(l.createdAt))).length, mine.filter(ran).length,
+      mine.filter(isWon).length, mine.filter(isLost).length, null, mine.filter(isWon).reduce((s,l)=>s+price(l),0), null];
+    if(row.slice(1,5).every(v=>!v) && !row[6]) return;
+    ws1.getRow(r).values = row;
+    ws1.getCell(r,6).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
+    ws1.getCell(r,8).value = { formula:`IF(D${r}=0,"",G${r}/D${r})` };
+    r++;
+  });
+  const firstRep = H1+1, lastRep = r-1;
+  if(lastRep<firstRep){ ws1.getRow(r).values = ['No activity in this period']; r++; }
+  else {
+    ws1.getRow(r).values = ['Team total'];
+    [2,3,4,5,7].forEach(c=> ws1.getCell(r,c).value = { formula:`SUM(${col(c)}${firstRep}:${col(c)}${lastRep})` });
+    ws1.getCell(r,6).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
+    ws1.getCell(r,8).value = { formula:`IF(D${r}=0,"",G${r}/D${r})` };
+    totalsRow(ws1, r);
+  }
+  for(let i=H1+1; i<=r; i++){ ws1.getCell(i,6).numFmt = PCT; ws1.getCell(i,7).numFmt = MONEY; ws1.getCell(i,8).numFmt = MONEY; }
+  const unassigned = leadsC.filter(l=>!l.assignedRep && inP(tsDay(l.createdAt))).length;
+  r += 2;
+  ws1.getCell(r,1).value = 'New leads in period'; ws1.getCell(r,2).value = leadsC.filter(l=>inP(tsDay(l.createdAt))).length; r++;
+  ws1.getCell(r,1).value = 'Not yet assigned'; ws1.getCell(r,2).value = unassigned; r++;
+  ws1.getCell(r,1).value = 'Upcoming appointments'; ws1.getCell(r,2).value = leadsC.filter(l=>l.apptDate && l.apptDate>today && !['won','lost'].includes(l.stage)).length;
+  [r-2,r-1,r].forEach(i=> ws1.getCell(i,1).font = { color:{argb:'FF555555'} });
+  ws1.views = [{ showGridLines:false, state:'frozen', ySplit:H1 }];
+
+  /* ---- Monthly trend ---- */
+  const ws2 = wb.addWorksheet('By Month', { views:[{ showGridLines:false }] });
+  const dates = leadsC.flatMap(l=>[tsDay(l.createdAt), l.apptDate, l.stage==='won'?wonDay(l):''].filter(Boolean));
+  let startM = p.a.slice(0,7), endM = p.b.slice(0,7);
+  if(p.a==='0000-01-01'){ startM = (dates.sort()[0]||today).slice(0,7); endM = today.slice(0,7); }
+  if(endM > today.slice(0,7)) endM = today.slice(0,7);
+  const months = [];
+  for(let [yy,mm] = startM.split('-').map(Number); `${yy}-${String(mm).padStart(2,'0')}` <= endM; mm===12 ? (yy++, mm=1) : mm++){
+    months.push(`${yy}-${String(mm).padStart(2,'0')}`); if(months.length>240) break;
+  }
+  const reps2 = roster.filter(rep=> leadsC.some(l=>l.assignedRep===rep && l.stage==='won'));
+  const nCols = 7 + reps2.length;
+  titleBlock(ws2, 'Monthly Sales', Math.max(nCols,7));
+  ws2.columns = [{width:14},{width:11},{width:13},{width:9},{width:14},{width:11},{width:12}, ...reps2.map(()=>({width:16}))];
+  ws2.getRow(4).values = ['Month','New leads','Appointments','Won','Revenue','Close rate','Avg sale', ...reps2.map(n=>n.split(' ')[0]+' revenue')];
+  header(ws2, 4);
+  r = 5;
+  months.forEach(mo=>{
+    const inM = ds=> !!ds && ds.slice(0,7)===mo && inP(ds);
+    const won = leadsC.filter(l=>l.stage==='won' && inM(wonDay(l)));
+    ws2.getRow(r).values = [xlDate(mo+'-01'), leadsC.filter(l=>inM(tsDay(l.createdAt))).length,
+      leadsC.filter(l=>l.apptDate && l.apptDate<=today && inM(l.apptDate)).length, won.length, won.reduce((s,l)=>s+price(l),0), null, null,
+      ...reps2.map(rep=> won.filter(l=>l.assignedRep===rep).reduce((s,l)=>s+price(l),0))];
+    ws2.getCell(r,6).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
+    ws2.getCell(r,7).value = { formula:`IF(D${r}=0,"",E${r}/D${r})` };
+    r++;
+  });
+  if(months.length){
+    ws2.getRow(r).values = ['Total'];
+    [2,3,4,5, ...reps2.map((_,i)=>8+i)].forEach(c=> ws2.getCell(r,c).value = { formula:`SUM(${col(c)}5:${col(c)}${r-1})` });
+    ws2.getCell(r,6).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
+    ws2.getCell(r,7).value = { formula:`IF(D${r}=0,"",E${r}/D${r})` };
+    totalsRow(ws2, r);
+  }
+  for(let i=5; i<=r; i++){
+    ws2.getCell(i,1).numFmt = 'mmm yyyy'; ws2.getCell(i,1).alignment = { horizontal:'left' };
+    ws2.getCell(i,5).numFmt = MONEY; ws2.getCell(i,6).numFmt = PCT; ws2.getCell(i,7).numFmt = MONEY;
+    reps2.forEach((_,k)=> ws2.getCell(i,8+k).numFmt = MONEY);
+  }
+  ws2.views = [{ showGridLines:false, state:'frozen', ySplit:4 }];
+
+  /* ---- Lead sources ---- */
+  const ws3 = wb.addWorksheet('Lead Sources', { views:[{ showGridLines:false }] });
+  titleBlock(ws3, 'Lead Sources', 7);
+  ws3.columns = [{width:24},{width:10},{width:13},{width:9},{width:11},{width:14},{width:12}];
+  ws3.getRow(4).values = ['Source','Leads','Appointments','Won','Close rate','Revenue','Avg sale'];
+  header(ws3, 4);
+  const groups = {};
+  leadsC.filter(l=>inP(tsDay(l.createdAt))).forEach(l=>{
+    const k = (l.leadSource||'').trim() || 'Not set';
+    const g = groups[k] = groups[k] || { k, n:0, a:0, w:0, rev:0 };
+    g.n++; if(l.apptDate) g.a++; if(l.stage==='won'){ g.w++; g.rev += price(l); }
+  });
+  const srcRows = Object.values(groups).sort((x,y)=> (x.k==='Not set')-(y.k==='Not set') || y.rev-x.rev || y.n-x.n);
+  r = 5;
+  srcRows.forEach(g=>{
+    ws3.getRow(r).values = [g.k, g.n, g.a, g.w, null, g.rev, null];
+    ws3.getCell(r,5).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
+    ws3.getCell(r,7).value = { formula:`IF(D${r}=0,"",F${r}/D${r})` };
+    r++;
+  });
+  if(srcRows.length){
+    ws3.getRow(r).values = ['Total'];
+    [2,3,4,6].forEach(c=> ws3.getCell(r,c).value = { formula:`SUM(${col(c)}5:${col(c)}${r-1})` });
+    ws3.getCell(r,5).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
+    ws3.getCell(r,7).value = { formula:`IF(D${r}=0,"",F${r}/D${r})` };
+    totalsRow(ws3, r);
+  } else { ws3.getCell(5,1).value = 'No leads in this period'; }
+  for(let i=5; i<=r; i++){ ws3.getCell(i,5).numFmt = PCT; ws3.getCell(i,6).numFmt = MONEY; ws3.getCell(i,7).numFmt = MONEY; }
+  ws3.views = [{ showGridLines:false, state:'frozen', ySplit:4 }];
+
+  /* ---- Won deals ---- */
+  const ws4 = wb.addWorksheet('Won Deals');
+  const wonList = leadsC.filter(isWon).sort((x,y)=>(x.updatedAt||0)-(y.updatedAt||0));
+  ws4.columns = [
+    {header:'Date won', key:'d', width:12}, {header:'Customer', key:'n', width:24}, {header:'City', key:'c', width:16},
+    {header:'Water specialist', key:'r', width:20}, {header:'System', key:'s', width:26}, {header:'Sale price', key:'p', width:13},
+    {header:'Lead source', key:'src', width:18}, {header:'Type', key:'t', width:10}, {header:'Phone', key:'ph', width:15}];
+  wonList.forEach(l=> ws4.addRow({ d:tsCell(l.updatedAt||l.createdAt), n:l.name||'', c:cityFromAddress(l.address), r:l.assignedRep||'',
+    s:l.systemName||'', p:price(l), src:l.leadSource||'', t:leadChannel(l)==='service'?'Service':'Install', ph:l.phone||'' }));
+  header(ws4, 1);
+  ws4.getColumn('d').numFmt = DATE; ws4.getColumn('p').numFmt = MONEY;
+  if(wonList.length){
+    const tr = ws4.addRow({ n:'Total', p:{ formula:`SUM(F2:F${wonList.length+1})` } }); totalsRow(ws4, tr.number);
+    ws4.getCell(tr.number,1).fill = ws4.getCell(tr.number,2).fill;
+    ws4.autoFilter = { from:'A1', to:'I'+(wonList.length+1) };
+  }
+  ws4.views = [{ state:'frozen', ySplit:1 }];
+
+  /* ---- All leads ---- */
+  const ws5 = wb.addWorksheet('All Leads');
+  const list = leadsC.filter(l=> inP(tsDay(l.createdAt)) || inP(l.apptDate) || isWon(l) || isLost(l)).sort((x,y)=>(x.createdAt||0)-(y.createdAt||0));
+  ws5.columns = [
+    {header:'Created', key:'cr', width:12}, {header:'Customer', key:'n', width:24}, {header:'Phone', key:'ph', width:15},
+    {header:'Email', key:'em', width:26}, {header:'Address', key:'ad', width:34}, {header:'City', key:'c', width:16},
+    {header:'Type', key:'t', width:10}, {header:'Lead source', key:'src', width:18}, {header:'Stage', key:'st', width:18},
+    {header:'Water specialist', key:'r', width:20}, {header:'Appt date', key:'ad2', width:12}, {header:'Appt time', key:'at', width:11},
+    {header:'System', key:'s', width:24}, {header:'Sale price', key:'p', width:13}, {header:'Booked by', key:'csr', width:16},
+    {header:'Last updated', key:'up', width:13}];
+  list.forEach(l=> ws5.addRow({ cr:tsCell(l.createdAt), n:l.name||'', ph:l.phone||'', em:l.email||'', ad:l.address||'', c:cityFromAddress(l.address),
+    t:leadChannel(l)==='service'?'Service':'Install', src:l.leadSource||'', st:stageLabel(l.stage), r:l.assignedRep||'',
+    ad2:dateCell(l.apptDate), at:l.apptStart ? slotLabel(l.apptStart) : '', s:l.systemName||'',
+    p: l.stage==='won' ? price(l) : null, csr:l.csr||l.createdByName||'', up:tsCell(l.updatedAt) }));
+  header(ws5, 1);
+  ['cr','ad2','up'].forEach(k=> ws5.getColumn(k).numFmt = DATE); ws5.getColumn('p').numFmt = MONEY;
+  if(list.length) ws5.autoFilter = { from:'A1', to:'P'+(list.length+1) };
+  ws5.views = [{ state:'frozen', ySplit:1 }];
+
+  return wb;
+}
+function openExportMenu(){
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  const periodSel = el('select',{id:'ex-period'});
+  [['month','This month'],['lastmonth','Last month'],['quarter','This quarter'],['year','This year'],['lastyear','Last year'],['all','All time'],['custom','Custom dates…']]
+    .forEach(([v,t])=>periodSel.append(el('option',{value:v}, t)));
+  const today = todayStr();
+  const from = el('input',{type:'date', id:'ex-from', value:today.slice(0,8)+'01'});
+  const to = el('input',{type:'date', id:'ex-to', value:today});
+  const customRow = el('div',{class:'row2'}, el('div',{class:'field'}, el('label',{}, 'From'), from), el('div',{class:'field'}, el('label',{}, 'Through'), to));
+  customRow.hidden = true;
+  periodSel.addEventListener('change', ()=>{ customRow.hidden = periodSel.value!=='custom'; });
+  const chanSel = el('select',{id:'ex-chan'});
+  [['install','Installs'],['service','Service'],['both','Installs + Service']].forEach(([v,t])=>chanSel.append(el('option',{value:v}, t)));
+  chanSel.value = state.channel;
+  const msg = el('div',{class:'attrib'});
+  const go = el('button',{class:'btn btn-primary'}, 'Download Excel');
+  go.addEventListener('click', async ()=>{
+    if(periodSel.value==='custom' && (!from.value || !to.value || to.value<from.value)){ msg.textContent = 'Check the dates.'; return; }
+    const p = exportPeriod(periodSel.value, from.value, to.value);
+    go.disabled = true; msg.textContent = 'Building your spreadsheet…';
+    try{
+      const all = await fetchAllLeadsForExport();
+      const wb = await buildSalesWorkbook(all, p, chanSel.value);
+      const buf = await wb.xlsx.writeBuffer();
+      const blob = new Blob([buf], { type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = "Nations Pure Sales - "+p.label.replace(/[^\w\s-]/g,'').replace(/\s+/g,' ').trim()+'.xlsx';
+      document.body.append(a); a.click(); a.remove();
+      setTimeout(()=>URL.revokeObjectURL(a.href), 4000);
+      closeModal(); showToast('Spreadsheet downloaded');
+    }catch(e){
+      console.error(e); go.disabled = false;
+      msg.textContent = "Couldn't build the spreadsheet. Check your connection and try again.";
+    }
+  });
+  modal.append(el('div',{class:'modal'},
+    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, 'Export to Excel'),
+        el('div',{class:'sheet-sub'}, 'Sales by rep, by month, lead sources, won deals, and all leads.')),
+      el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
+    el('div',{class:'row2'},
+      el('div',{class:'field'}, el('label',{}, 'Time period'), periodSel),
+      el('div',{class:'field'}, el('label',{}, 'Leads'), chanSel)),
+    customRow,
+    msg,
+    el('div',{class:'modal-actions'}, el('button',{class:'link-btn', onclick:closeModal}, 'Cancel'), go)
+  ));
+  overlay.hidden = false;
+  overlay.onclick = e=>{ if(e.target===overlay) closeModal(); };
+}
+$('#exportXlsxBtn').addEventListener('click', openExportMenu);
 
 /* ================= REP: MY ANALYTICS ================= */
 let repRange = 'month';
