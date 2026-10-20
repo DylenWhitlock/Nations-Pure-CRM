@@ -154,3 +154,38 @@ begin
 end $$;
 revoke all on function public.calendar_feed(text) from public;
 grant execute on function public.calendar_feed(text) to anon, authenticated;
+
+-- ============ Morning briefing (run once in Supabase → SQL Editor) ============
+-- Morning briefing: lets the 7am briefing read a summary of the CRM with a secret link.
+create table if not exists brief_tokens (
+  token text primary key,
+  created_at bigint not null default (extract(epoch from now()) * 1000)::bigint
+);
+alter table brief_tokens enable row level security;
+insert into brief_tokens (token) values ('<secret token is only in your Supabase project>') on conflict do nothing;
+
+create or replace function public.morning_brief(p_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare since_ms bigint := (extract(epoch from now() - interval '75 days') * 1000)::bigint;
+begin
+  if p_token is null or length(p_token) < 32 then return null; end if;
+  if not exists (select 1 from brief_tokens where token = p_token) then return null; end if;
+  return jsonb_build_object(
+    'leads', coalesce((
+      select jsonb_agg(jsonb_build_object('name', l.name, 'address', l.address, 'stage', l.stage,
+        'channel', to_jsonb(l)->>'channel', 'assigned_rep', l.assigned_rep, 'appt_date', l.appt_date,
+        'appt_start', l.appt_start, 'sale_price', l.sale_price, 'off_hours', l.off_hours,
+        'rep_confirmed', l.rep_confirmed, 'created_at', l.created_at, 'updated_at', l.updated_at))
+      from leads l
+      where l.created_at >= since_ms or l.updated_at >= since_ms
+         or l.appt_date >= to_char(now() - interval '75 days', 'YYYY-MM-DD')
+         or l.stage in ('new', 'scheduled')
+    ), '[]'::jsonb),
+    'blocks', coalesce((
+      select jsonb_agg(jsonb_build_object('rep', b.rep, 'date', b.date, 'slot', b.slot, 'status', b.status))
+      from blocks b
+      where b.date between to_char(now() - interval '1 day', 'YYYY-MM-DD') and to_char(now() + interval '1 day', 'YYYY-MM-DD')
+    ), '[]'::jsonb));
+end $$;
+revoke all on function public.morning_brief(text) from public;
+grant execute on function public.morning_brief(text) to anon, authenticated;
