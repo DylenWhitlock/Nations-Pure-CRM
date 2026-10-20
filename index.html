@@ -246,7 +246,22 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .locked-field{background:var(--surface-2); color:var(--text-muted); cursor:not-allowed;}
 
 /* leaderboard */
-.lb-row{display:flex; align-items:center; gap:14px; padding:14px 4px; border-top:1px solid var(--border);}
+.lb-row{display:flex; align-items:center; gap:14px; padding:14px 8px; border:none; border-top:1px solid var(--border); width:100%; background:none; font:inherit; color:inherit; text-align:left; cursor:pointer; border-radius:8px;}
+.lb-row:hover{background:var(--surface-2);}
+.lb-go{display:inline-flex; vertical-align:-2px; margin-left:4px; color:var(--text-muted);}
+.ra-summary{display:grid; grid-template-columns:repeat(4,1fr); gap:8px;}
+.ra-kpi{background:var(--surface-2); border-radius:10px; padding:10px; text-align:center;}
+.ra-kpi .v{font-size:17px; font-weight:800; font-variant-numeric:tabular-nums;}
+.ra-kpi .k{font-size:11px; color:var(--text-muted); font-weight:600; margin-top:2px;}
+.ra-list{display:flex; flex-direction:column; border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+.ra-list .empty-note{padding:16px;}
+.ra-row{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:11px 12px; border:none; border-top:1px solid var(--border); background:none; font:inherit; color:inherit; text-align:left; width:100%;}
+button.ra-row{cursor:pointer;} button.ra-row:hover{background:var(--surface-2);}
+.ra-row:first-child{border-top:none;}
+.ra-main{min-width:0;}
+.ra-name{font-weight:700; font-size:14px;}
+.ra-sub{font-size:12px; color:var(--text-muted); margin-top:2px;}
+@media (max-width:520px){ .ra-summary{grid-template-columns:1fr 1fr;} }
 .lb-row:first-child{border-top:none;}
 .lb-rank{font-size:15px; font-weight:800; color:var(--text-muted); width:28px; flex:none;}
 .lb-main{flex:1; min-width:0; display:flex; flex-direction:column; gap:6px;}
@@ -364,8 +379,9 @@ fieldset.wo-fieldset{border:1px solid var(--border); border-radius:12px; padding
 .info-row .k{color:var(--text-muted); font-weight:600; flex:none;}
 .info-row .v{text-align:right; min-width:0; overflow-wrap:anywhere;}
 .info-row a{color:var(--accent-strong); font-weight:700; text-decoration:none;}
-.quick-actions{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
-.quick-actions .btn{justify-content:center; text-decoration:none;}
+.quick-actions{display:grid; grid-template-columns:repeat(auto-fit, minmax(72px, 1fr)); gap:8px;}
+.quick-actions .btn{justify-content:center; text-decoration:none; gap:6px;}
+.quick-actions .btn svg{flex:none;}
 .outcome-row{display:grid; grid-template-columns:repeat(2,1fr); gap:6px;}
 .outcome-row .btn{justify-content:center; padding:9px 8px;}
 .outcome-row .btn.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong);}
@@ -487,7 +503,22 @@ body{
   .wrap{padding:18px 16px 56px;}
   .search{min-width:0;} .search input{width:110px;}
 }
-@media (max-width:560px){ .appbar .search{display:none !important;} #signOutBtn{display:none;} }
+@media (max-width:560px){
+  #signOutBtn{display:none;}
+  /* search gets its own full-width row on phones */
+  .appbar .top-controls{display:contents;}
+  #newLeadBtn{order:1; margin-left:auto;} .user-chip-wrap{order:2;}
+  .appbar .search{order:3; width:100%; min-width:0; height:40px; margin-top:6px;}
+  .appbar .search input{width:100%; font-size:16px;}
+  .appbar .tabs{order:4;}
+}
+@media (max-width:640px){
+  /* 16px keeps iPhone from zooming in when you tap a field */
+  .field input[type=text], .field input[type=tel], .field input[type=email], .field input[type=password], .field input[type=date], .field input[type=number], .field textarea, .field select{font-size:16px;}
+  .quick-actions{grid-template-columns:repeat(auto-fit, minmax(0, 1fr)); gap:6px;}
+  .quick-actions .btn{height:56px; flex-direction:column; gap:3px; padding:6px 4px; font-size:12px;}
+  .info-row{padding:12px;}
+}
 
 /* page head */
 .page-head{display:flex; align-items:flex-end; justify-content:space-between; gap:16px; margin-bottom:20px; flex-wrap:wrap;}
@@ -946,7 +977,10 @@ const STAGES = [
   {id:'won', label:'Won', dot:'success'},
   {id:'lost', label:'Lost', dot:'danger'},
 ];
-const REP_SUGGESTIONS = ['Chris Novotny','Tony Rodriguez','Dylen Whitlock'];
+const REP_SUGGESTIONS = ['Chris Novotny','Dylen Whitlock'];
+// No longer a sales rep — kept out of rep lists; past deals still count in team totals and exports.
+const FORMER_REPS = ['tony rodriguez'];
+function isFormerRep(n){ return FORMER_REPS.includes((n||'').trim().toLowerCase()); }
 
 const sb = window.supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
 let currentUser = null; // {id, email, name, role}
@@ -1250,7 +1284,7 @@ function renderAnalytics(){
   renderSourceTable();
   const cl = chanLeads(leads);
   const roster = Array.from(new Set([...REP_SUGGESTIONS, ...cl.map(l=>l.assignedRep).filter(Boolean)]));
-  const rows = roster.map(rep=>{
+  const allRows = roster.map(rep=>{
     const mine = cl.filter(l=>l.assignedRep===rep);
     const appts = mine.filter(l=>l.apptDate).length;
     const won = mine.filter(l=>l.stage==='won');
@@ -1259,10 +1293,11 @@ function renderAnalytics(){
     const avgSale = won.length>0 ? totalRevenue/won.length : 0;
     return { rep, appts, wonCount:won.length, conversion, avgSale, totalRevenue };
   }).sort((a,b)=> b.wonCount-a.wonCount || b.totalRevenue-a.totalRevenue);
+  const rows = allRows.filter(r=>!isFormerRep(r.rep));
 
-  const totalAppts = rows.reduce((s,r)=>s+r.appts,0);
-  const totalWon = rows.reduce((s,r)=>s+r.wonCount,0);
-  const totalRevenue = rows.reduce((s,r)=>s+r.totalRevenue,0);
+  const totalAppts = allRows.reduce((s,r)=>s+r.appts,0);
+  const totalWon = allRows.reduce((s,r)=>s+r.wonCount,0);
+  const totalRevenue = allRows.reduce((s,r)=>s+r.totalRevenue,0);
   const overallConv = totalAppts>0 ? (totalWon/totalAppts*100) : 0;
   const overallAvg = totalWon>0 ? totalRevenue/totalWon : 0;
 
@@ -1282,10 +1317,10 @@ function renderAnalytics(){
   }
   rows.forEach((r,i)=>{
     const pct = Math.max(0, Math.min(100, r.conversion));
-    board.append(el('div',{class:'lb-row'},
+    board.append(el('button',{class:'lb-row', title:'See '+r.rep+'’s appointments', onclick:()=>openRepAppts(r.rep)},
       el('div',{class:'lb-rank'}, '#'+(i+1)),
       el('div',{class:'lb-main'},
-        el('div',{class:'lb-name'}, r.rep),
+        el('div',{class:'lb-name'}, r.rep, el('span',{class:'lb-go', html:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'})),
         el('div',{class:'lb-meter'}, el('div',{class:'lb-meter-fill', style:'width:'+pct+'%;'})),
         el('div',{class:'lb-sub'}, r.wonCount+' won · '+r.appts+' appts · '+r.conversion.toFixed(0)+'% conversion')
       ),
@@ -1418,6 +1453,7 @@ function openModal(){
     el('button',{class:'icon-btn', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})
   ));
 
+  if(lead){ const qa = contactActions(lead); if(qa) form.append(qa); }
   if(lead && lead.address){ const propCard = buildPropertyCard(lead); if(propCard) form.append(propCard); }
 
   const nameF = el('input',{type:'text', id:'f-name', placeholder:'Customer name'}); nameF.value = lead?.name||'';
@@ -1534,7 +1570,7 @@ function openModal(){
   modal.append(form);
   overlay.hidden = false;
   overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
-  setTimeout(()=>nameF.focus(), 50);
+  if(!lead && !matchMedia('(pointer:coarse)').matches) setTimeout(()=>nameF.focus(), 50);
 }
 
 async function saveLead(existing, opts={}){
@@ -2434,7 +2470,7 @@ function gcAnchor(){ if(!gc.anchor){ gc.anchor = new Date(); gc.anchor.setHours(
 function gcRoster(){
   if(isRepUser()) return [currentUser.name];
   const seen = new Map();
-  [...REP_SUGGESTIONS, ...leads.map(l=>l.assignedRep)].forEach(n=>{ const k=(n||'').trim(); if(k && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k); });
+  [...REP_SUGGESTIONS, ...leads.map(l=>l.assignedRep)].forEach(n=>{ const k=(n||'').trim(); if(k && !isFormerRep(k) && !seen.has(k.toLowerCase())) seen.set(k.toLowerCase(), k); });
   return [...seen.values()];
 }
 function gcVisibleRep(name){ return !gc.hidden.has((name||'').trim().toLowerCase()); }
@@ -2904,6 +2940,29 @@ function renderMyAppts(){
     box.append(sec);
   }
 }
+function telHref(p){ return 'tel:'+(p||'').replace(/[^\d+]/g,''); }
+function smsHref(p){ return 'sms:'+(p||'').replace(/[^\d+]/g,''); }
+function mapsHref(a){ return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a||''); }
+const QA_ICONS = {
+  call:'<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
+  text:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
+  email:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 7l9 6 9-6"/>',
+  map:'<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21z"/><circle cx="12" cy="9.5" r="2.5"/>',
+};
+function qaBtn(kind, label, href, primary){
+  const ext = /^https?:/.test(href) ? { target:'_blank', rel:'noopener' } : {};
+  return el('a',{class:'btn'+(primary?' btn-primary':''), href, ...ext,
+    html:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round">'+QA_ICONS[kind]+'</svg><span>'+label+'</span>'});
+}
+// Call / Text / Email / Directions — one tap on a phone instead of copy and paste.
+function contactActions(lead){
+  if(!lead) return null;
+  const qa = el('div',{class:'quick-actions'});
+  if(lead.phone) qa.append(qaBtn('call','Call', telHref(lead.phone)), qaBtn('text','Text', smsHref(lead.phone)));
+  if(lead.email) qa.append(qaBtn('email','Email', 'mailto:'+lead.email));
+  if(lead.address) qa.append(qaBtn('map','Directions', mapsHref(lead.address), true));
+  return qa.children.length ? qa : null;
+}
 function infoRow(k, v){ return el('div',{class:'info-row'}, el('span',{class:'k'}, k), el('span',{class:'v'}, v)); }
 function openApptSheet(id){
   const lead = leads.find(l=>l.id===id);
@@ -2923,15 +2982,12 @@ function openApptSheet(id){
 
   const propCard = buildPropertyCard(lead); if(propCard) form.append(propCard);
 
-  const qa = el('div',{class:'quick-actions'});
-  if(lead.phone) qa.append(el('a',{class:'btn', href:'tel:'+(lead.phone||'').replace(/[^\d+]/g,'')}, 'Call'));
-  if(lead.address) qa.append(el('a',{class:'btn btn-primary', href:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(lead.address), target:'_blank', rel:'noopener'}, 'Directions'));
-  if(qa.children.length) form.append(qa);
+  const qa = contactActions(lead); if(qa) form.append(qa);
 
   const info = el('div',{class:'info-list'});
-  if(lead.phone) info.append(infoRow('Phone', el('a',{href:'tel:'+(lead.phone||'').replace(/[^\d+]/g,'')}, lead.phone)));
+  if(lead.phone) info.append(infoRow('Phone', el('a',{href:telHref(lead.phone)}, lead.phone)));
   if(lead.email) info.append(infoRow('Email', el('a',{href:'mailto:'+lead.email}, lead.email)));
-  if(lead.address) info.append(infoRow('Address', lead.address));
+  if(lead.address) info.append(infoRow('Address', el('a',{href:mapsHref(lead.address), target:'_blank', rel:'noopener'}, lead.address)));
   if(lead.county) info.append(infoRow('County', lead.county));
   if(lead.leadSource) info.append(infoRow('Lead source', lead.leadSource));
   if(lead.need) info.append(infoRow('Needs', lead.need));
@@ -3157,6 +3213,59 @@ $('#srcRangeSeg').addEventListener('click', e=>{
   $('#srcRangeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
   renderSourceTable();
 });
+
+/* ================= REP DRILL-DOWN: APPOINTMENTS RUN ================= */
+function openRepAppts(rep){
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  let range = 'month', rows = null, failed = false;
+  const seg = el('div',{class:'seg'});
+  [['month','This month'],['year','This year'],['all','All time']].forEach(([v,t])=>{
+    const b = el('button',{'data-range':v, class: v===range?'on':''}, t);
+    b.addEventListener('click', ()=>{ range = v; seg.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b)); paint(); });
+    seg.append(b);
+  });
+  const summary = el('div',{class:'ra-summary'});
+  const list = el('div',{class:'ra-list'}, el('div',{class:'empty-note'}, 'Loading…'));
+  const today = todayStr();
+  function paint(){
+    list.innerHTML = ''; summary.innerHTML = '';
+    if(failed){ list.append(el('div',{class:'empty-note'}, "Couldn't load appointments. Try again.")); return; }
+    if(!rows) { list.append(el('div',{class:'empty-note'}, 'Loading…')); return; }
+    const ran = rows.filter(l=>l.apptDate<=today && inRange(new Date(l.apptDate+'T12:00:00').getTime(), range));
+    const won = ran.filter(l=>l.stage==='won');
+    const rev = won.reduce((s,l)=>s+(Number(l.salePrice)||0),0);
+    const upcoming = rows.filter(l=>l.apptDate>today).length;
+    [[String(ran.length),'Appts run'],[String(won.length),'Won'],[ran.length?Math.round(won.length/ran.length*100)+'%':'—','Close rate'],[fmtMoney(rev),'Revenue']]
+      .forEach(([v,k])=>summary.append(el('div',{class:'ra-kpi'}, el('div',{class:'v'}, v), el('div',{class:'k'}, k))));
+    if(!ran.length){ list.append(el('div',{class:'empty-note'}, 'No appointments run in this period')); }
+    ran.forEach(l=>{
+      const outcome = l.stage==='won' ? el('span',{class:'badge badge-appt'}, 'Won'+(l.salePrice?' · '+fmtMoney(l.salePrice):''))
+        : l.stage==='lost' ? el('span',{class:'badge badge-warn'}, 'Lost')
+        : el('span',{class:'badge badge-time'}, 'Open');
+      const when = parseYmd(l.apptDate).toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'})+(l.apptStart?' · '+slotLabel(l.apptStart):'');
+      const sub = [cityFromAddress(l.address), l.stage==='won' ? l.systemName : '', leadChannel(l)==='service' ? 'Service' : ''].filter(Boolean).join(' · ');
+      const inBoard = leads.some(x=>x.id===l.id);
+      list.append(el(inBoard?'button':'div',{class:'ra-row', ...(inBoard?{onclick:()=>openEdit(l.id)}:{})},
+        el('div',{class:'ra-main'}, el('div',{class:'ra-name'}, l.name||'Customer'), el('div',{class:'ra-sub'}, when+(sub?' · '+sub:''))),
+        outcome));
+    });
+    if(upcoming) list.append(el('div',{class:'attrib', style:'margin-top:8px;'}, upcoming+' upcoming appointment'+(upcoming===1?'':'s')+' not shown'));
+  }
+  modal.append(el('div',{class:'modal'},
+    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, rep), el('div',{class:'sheet-sub'}, 'Appointments run · '+(isService()?'Service':'Installs'))),
+      el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
+    seg, summary, list));
+  overlay.hidden = false;
+  overlay.onclick = e=>{ if(e.target===overlay) closeModal(); };
+  paint();
+  sb.from('leads').select('*').eq('assigned_rep', rep).neq('appt_date','').order('appt_date',{ascending:false}).order('appt_start',{ascending:false}).limit(3000)
+    .then(({data, error})=>{
+      if(error){ console.error(error); failed = true; }
+      else rows = data.map(mapLead).filter(l=>leadChannel(l)===state.channel && /^\d{4}-\d{2}-\d{2}$/.test(l.apptDate||''));
+      paint();
+    });
+}
 
 /* ================= EXCEL EXPORT ================= */
 let exceljsLoading = null;
@@ -3576,7 +3685,7 @@ async function sendTestText(trigger, btn){
 function renderRepPhones(){
   const box = $('#repPhoneList'); box.innerHTML = '';
   const names = new Map();
-  const add = n=>{ const k=(n||'').trim(); if(k && !names.has(k.toLowerCase())) names.set(k.toLowerCase(), k); };
+  const add = n=>{ const k=(n||'').trim(); if(k && !isFormerRep(k) && !names.has(k.toLowerCase())) names.set(k.toLowerCase(), k); };
   REP_SUGGESTIONS.forEach(add);
   comm.repPhones.forEach(r=>add(r.rep_name));
   leads.forEach(l=>add(l.assignedRep));
