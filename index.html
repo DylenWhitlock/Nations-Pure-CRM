@@ -433,7 +433,26 @@ button.ra-row{cursor:pointer;} button.ra-row:hover{background:var(--surface-2);}
 .wt-rec{border:1px solid var(--border); background:var(--surface); color:var(--text-muted); font:inherit; font-size:13px; font-weight:700; padding:8px 12px; border-radius:999px; cursor:pointer;}
 .wt-rec.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong);}
 #wt-note{border:1px solid var(--border); border-radius:9px; padding:10px 11px; font:inherit; font-size:14px; background:var(--bg); color:var(--text); width:100%; min-height:60px; resize:vertical;}
-@media (max-width:640px){ #wt-note{font-size:16px;} }
+.wt-field label small{font-weight:600; opacity:.75;}
+.wt-src{display:grid; grid-template-columns:1fr 1fr;} .wt-src button{padding:9px 10px;}
+.wt-acts .wt-send{gap:7px;}
+.wt-flash{animation:wtflash 1.6s ease;}
+@keyframes wtflash{0%,40%{box-shadow:0 0 0 3px var(--accent); border-color:var(--accent);} 100%{box-shadow:none;}}
+.wt-foot{position:sticky; bottom:-22px; background:var(--surface); margin:0 -22px -22px; padding:12px 22px calc(12px + env(safe-area-inset-bottom)); border-top:1px solid var(--border);}
+@media (max-width:640px){
+  #wt-note{font-size:16px;}
+  #modal > .modal.wt-sheet{height:100dvh; max-height:100dvh; border-radius:0; padding-top:max(16px, env(safe-area-inset-top));}
+  .wt-grid{grid-template-columns:1fr 1fr; gap:12px 10px;}
+  .wt-field input{font-size:24px; padding:12px; height:58px;}
+  .wt-field.wt-ph{grid-column:1 / -1;}
+  .wt-rec{font-size:14px; padding:10px 14px;}
+  .wt-foot .btn{flex:1; justify-content:center; height:50px; font-size:15px;}
+  .wt-acts{display:grid; grid-template-columns:1fr 1fr;}
+  .wt-acts .wt-send{grid-column:1 / -1; height:50px; font-size:15px;}
+  .wt-acts .btn{justify-content:center; height:44px;}
+  .wt-empty{flex-direction:column; align-items:stretch;}
+  .wt-start{height:50px; justify-content:center; font-size:15px;}
+}
 
 /* rep analytics */
 .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px;}
@@ -2601,14 +2620,15 @@ function buildWaterCard(lead){
   if(!t){
     box.append(el('div',{class:'wt-empty'},
       el('div',{}, el('div',{class:'wt-title'}, 'Water test'), el('div',{class:'wt-sub'}, 'Enter results and send the customer their report')),
-      el('button',{class:'btn btn-primary', onclick:()=>openWaterTest(lead)}, 'Start test')));
+      el('button',{class:'btn btn-primary wt-start', onclick:()=>openWaterTest(lead)}, 'Start test')));
     return box;
   }
   const chips = el('div',{class:'wt-chips'});
   WT_FIELDS.forEach(f=>{ const r = wtRate(f.id, t[f.id]); if(r) chips.append(el('span',{class:'wt-chip '+r.level}, f.label+' '+t[f.id]+(f.unit?' '+f.unit:''))); });
   const acts = el('div',{class:'wt-acts'});
   if(lead.reportToken){
-    if(lead.phone) acts.append(el('a',{class:'btn btn-primary', href:smsToCustomer(lead)}, 'Text to customer'));
+    if(lead.phone) acts.append(el('a',{class:'btn btn-primary wt-send', href:smsToCustomer(lead),
+      html:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/></svg><span>Text report to customer</span>'}));
     acts.append(el('a',{class:'btn', href:reportUrl(lead.reportToken), target:'_blank', rel:'noopener'}, 'View report'));
   }
   acts.append(el('button',{class:'btn', onclick:()=>openWaterTest(lead)}, 'Edit'));
@@ -2623,7 +2643,7 @@ function openWaterTest(lead){
   modal.innerHTML = '';
   const t = Object.assign({ source:'city', hardness:'', iron:'', tds:'', chlorine:'', ph:'', recs:null, note:'' }, lead.waterTest||{});
   let recs = new Set(t.recs || wtSuggest(t)), touchedRecs = !!t.recs;
-  const src = el('div',{class:'seg'});
+  const src = el('div',{class:'seg wt-src'});
   [['city','City water'],['well','Well water']].forEach(([v,lbl])=>{
     const b = el('button',{type:'button', class:t.source===v?'on':''}, lbl);
     b.onclick = ()=>{ t.source = v; src.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b)); };
@@ -2632,11 +2652,14 @@ function openWaterTest(lead){
   const grid = el('div',{class:'wt-grid'});
   const rateEls = {};
   WT_FIELDS.forEach(f=>{
-    const inp = el('input',{type:'number', inputmode:'decimal', step:f.step, min:'0', placeholder:'—', id:'wt-'+f.id});
+    const inp = el('input',{type:'text', inputmode:'decimal', enterkeyhint: f.id==='ph' ? 'done' : 'next', autocomplete:'off', placeholder:'—', id:'wt-'+f.id});
     inp.value = t[f.id];
     rateEls[f.id] = el('div',{class:'wt-rate'});
-    inp.addEventListener('input', ()=>{ t[f.id] = inp.value; paintRates(); if(!touchedRecs){ recs = new Set(wtSuggest(t)); paintRecs(); } });
-    grid.append(el('div',{class:'wt-field'}, el('label',{}, f.label+(f.unit?' ('+f.unit+')':'')), inp, rateEls[f.id]));
+    inp.addEventListener('keydown', e=>{ if(e.key!=='Enter') return; e.preventDefault();
+      const all = [...grid.querySelectorAll('input')], i = all.indexOf(inp); if(all[i+1]) all[i+1].focus(); else inp.blur(); });
+    inp.addEventListener('input', ()=>{ const c = inp.value.replace(',', '.').replace(/[^\d.]/g,''); if(c!==inp.value) inp.value = c;
+      t[f.id] = c===''||isNaN(Number(c)) ? '' : c; paintRates(); if(!touchedRecs){ recs = new Set(wtSuggest(t)); paintRecs(); } });
+    grid.append(el('div',{class:'wt-field wt-'+f.id}, el('label',{for:'wt-'+f.id}, f.label, f.unit ? el('small',{}, ' '+f.unit) : null), inp, rateEls[f.id]));
   });
   function paintRates(){ WT_FIELDS.forEach(f=>{ const r = wtRate(f.id, t[f.id]); rateEls[f.id].className = 'wt-rate'+(r?' '+r.level:''); rateEls[f.id].textContent = r ? r.text : ''; }); }
   const recBox = el('div',{class:'wt-recs'});
@@ -2661,16 +2684,17 @@ function openWaterTest(lead){
     lead.waterTest = test; lead.reportToken = token; lead.updatedAt = Date.now();
     showToast('Water report ready');
     reopenLead(lead.id);
+    setTimeout(()=>{ const c = document.querySelector('#modal .wt-card'); if(c){ c.classList.add('wt-flash'); c.scrollIntoView({behavior:'smooth', block:'center'}); } }, 60);
   }
   paintRates(); paintRecs();
-  modal.append(el('div',{class:'modal'},
+  modal.append(el('div',{class:'modal wt-sheet'},
     el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, 'Water test'), el('div',{class:'sheet-sub'}, lead.name||'Customer')),
       el('button',{class:'icon-btn', 'aria-label':'Close', onclick:()=>reopenLead(lead.id), html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
     src, grid,
     el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Recommended systems'), recBox),
     el('div',{class:'field'}, note),
     msg,
-    el('div',{class:'modal-actions'}, el('button',{class:'link-btn', onclick:()=>reopenLead(lead.id)}, 'Cancel'),
+    el('div',{class:'modal-actions wt-foot'}, el('button',{class:'link-btn', onclick:()=>reopenLead(lead.id)}, 'Cancel'),
       el('button',{class:'btn btn-primary', onclick:save}, 'Save & make report'))));
   overlay.hidden = false;
   overlay.onclick = e=>{ if(e.target===overlay) reopenLead(lead.id); };
@@ -3496,6 +3520,7 @@ function openApptSheet(id){
   const propCard = buildPropertyCard(lead); if(propCard) form.append(propCard);
 
   const qa = contactActions(lead); if(qa) form.append(qa);
+  form.append(buildWaterCard(lead));
 
   const info = el('div',{class:'info-list'});
   if(lead.phone) info.append(infoRow('Phone', el('a',{href:telHref(lead.phone)}, lead.phone)));
@@ -3512,7 +3537,6 @@ function openApptSheet(id){
     form.append(el('div',{class:'lead-docs'}, el('div',{class:'lbl'}, 'Service PDFs'), serviceFilesList(lead, false)));
   }
 
-  form.append(buildWaterCard(lead));
   const outcome = el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Outcome'));
   const row = el('div',{class:'outcome-row'});
   [['won','Won'],['lost','Lost']].forEach(([id,label])=>{
