@@ -140,6 +140,11 @@ button{font-family:inherit;}
 .switch input:checked + .track .thumb{transform:translateX(16px);}
 .warn-note{font-size:12px; color:var(--warning); background:var(--warning-soft); border-radius:9px; padding:8px 10px; display:flex; gap:6px; align-items:flex-start;}
 .modal-actions{display:flex; gap:8px; justify-content:space-between; align-items:center; margin-top:4px;}
+.save-wrap{display:flex; align-items:center; gap:10px; margin-left:auto;}
+.save-status{font-size:12px; color:var(--text-muted); font-weight:600;}
+.save-status.ok{color:var(--success);}
+.save-status.err{color:var(--danger);}
+.draft-banner{display:flex; justify-content:space-between; align-items:center; gap:8px; background:var(--accent-soft); color:var(--accent-strong); border-radius:9px; padding:8px 12px; font-size:12.5px; font-weight:700;}
 .attrib{font-size:11.5px; color:var(--text-muted);}
 .confirm-del{display:flex; align-items:center; gap:8px; font-size:12px; color:var(--text-muted);}
 .confirm-del button{font-size:12px; padding:6px 10px;}
@@ -1199,7 +1204,7 @@ async function fetchLeads(){
   }
   leads = all.map(mapLead);
   render();
-  if(state.editingId && !state.apptId) openModal();
+  if(state.editingId && !state.apptId && !modalBusy()) openModal();
   cleanupStaleAppts();
 }
 async function fetchBrochures(){
@@ -1294,7 +1299,7 @@ function matchesSearch(l){
   const q = state.search.toLowerCase();
   return (l.name||'').toLowerCase().includes(q) || (l.phone||'').toLowerCase().includes(q) || (l.email||'').toLowerCase().includes(q);
 }
-function render(){ renderStats(); renderBoard(); if(state.view==='analytics') renderAnalytics(); if(state.view==='calendar') gcRender(); if(state.apptId) openApptSheet(state.apptId); }
+function render(){ renderStats(); renderBoard(); if(state.view==='analytics') renderAnalytics(); if(state.view==='calendar') gcRender(); if(state.apptId && !modalBusy()) openApptSheet(state.apptId); }
 
 function visibleLeads(){
   const scoped = chanLeads(leads);
@@ -1533,9 +1538,129 @@ async function changeStage(lead, newStage, selectEl){
   render();
   if(rel) showToast('Appointment time cleared');
 }
+/* ================= AUTO-SAVE (lead form) =================
+   Existing leads save themselves as you type (no Save button). A new lead that hasn't been added yet
+   is kept as a draft on this device, so closing the form by accident doesn't lose it. Note text is
+   kept the same way, and added automatically when the lead is closed. */
+const AUTO_IDS = ['f-name','f-phone','f-email','f-addr','f-county','f-csr','f-source','f-need','f-window','f-offhours','f-confirmed','f-channel','f-technotes'];
+const DRAFT_IDS = [...AUTO_IDS, 'f-stage', 'f-newnote'];
+const LEAD_DRAFT_KEY = 'np_lead_draft';
+let autosaveTimer = null, autosaveChain = Promise.resolve(), lastAutosaveAt = 0, formLeadId = null;
+function lsGet(k){ try{ return localStorage.getItem(k); }catch(e){ return null; } }
+function lsSet(k, v){ try{ if(v==null) localStorage.removeItem(k); else localStorage.setItem(k, v); }catch(e){} }
+function readLeadForm(){
+  const v = id=>(($('#'+id)?.value)||'').trim();
+  return {
+    name:v('f-name'), phone:v('f-phone'), email:v('f-email'), address:v('f-addr'), county:v('f-county'), csr:v('f-csr'),
+    lead_source:v('f-source'), need:v('f-need'), requested_window:v('f-window'), stage:$('#f-stage').value,
+    off_hours:!!$('#f-offhours')?.checked, rep_confirmed:!!$('#f-confirmed')?.checked, updated_at:Date.now(),
+    channel: $('#f-channel')?.value==='service' ? 'service' : 'install', tech_notes:v('f-technotes'),
+  };
+}
+function leadPatchFrom(d){
+  return { name:d.name, phone:d.phone, email:d.email, address:d.address, county:d.county, csr:d.csr, leadSource:d.lead_source,
+    need:d.need, requestedWindow:d.requested_window, stage:d.stage, offHours:d.off_hours, repConfirmed:d.rep_confirmed,
+    channel:d.channel, techNotes:d.tech_notes };
+}
+function setSaveStatus(t, cls){ const e = $('#saveStatus'); if(e){ e.textContent = t; e.className = 'save-status'+(cls?' '+cls:''); } }
+// Copies what's on the form into the lead right away (sync) and returns what needs writing, or null.
+function captureLeadForm(lead){
+  if(!lead || formLeadId!==lead.id || !$('#f-name')) return null;
+  const d = readLeadForm();
+  if(!d.name) return null;
+  if(d.stage==='won' && lead.stage!=='won'){
+    if(pendingWonDetails){ d.sale_price = pendingWonDetails.salePrice; d.system_name = pendingWonDetails.systemName; pendingWonDetails = null; }
+    else d.stage = lead.stage;   // the Won price/system box is still open
+  }
+  const patch = leadPatchFrom(d);
+  const same = (a,b)=> typeof b==='boolean' ? !!a===b : (a??'')===(b??'');
+  if(Object.keys(patch).every(k=>same(lead[k], patch[k])) && d.sale_price==null) return null;
+  const prevStage = lead.stage;
+  Object.assign(lead, patch, d.sale_price!=null ? { salePrice:d.sale_price, systemName:d.system_name } : {}, { updatedAt:d.updated_at });
+  return { d, prevStage };
+}
+function queueLeadSave(lead, cap){
+  if(!cap) return autosaveChain;
+  lastAutosaveAt = Date.now();
+  setSaveStatus('Saving…');
+  autosaveChain = autosaveChain.then(async ()=>{
+    const d = cap.d;
+    const rel = d.stage!==cap.prevStage ? await apptReleaseFields(lead, d.stage) : null;
+    if(rel){ d.appt_date = ''; d.appt_start = ''; d.note_log = rel.note_log; }
+    const { error } = await sb.from('leads').update(d).eq('id', lead.id);
+    lastAutosaveAt = Date.now();
+    if(error){ console.error(error); setSaveStatus('Not saved — check your connection', 'err'); showToast("Couldn't save — check your connection"); return; }
+    if(rel){ applyRelease(lead, rel); showToast('Appointment time cleared'); if(state.editingId===lead.id && !state.apptId) openModal(); }
+    if(d.stage==='won' && cap.prevStage!=='won') showToast('Marked Won');
+    setSaveStatus('All changes saved', 'ok');
+    renderStats(); renderBoard(); if(state.view==='analytics') renderAnalytics();
+  }).catch(e=>{ console.error(e); setSaveStatus('Not saved — check your connection', 'err'); });
+  return autosaveChain;
+}
+function flushAutosave(){
+  clearTimeout(autosaveTimer); autosaveTimer = null;
+  const lead = leads.find(l=>l.id===formLeadId);
+  return queueLeadSave(lead, captureLeadForm(lead));
+}
+function scheduleAutosave(){
+  if(!formLeadId) return;
+  clearTimeout(autosaveTimer);
+  if(!($('#f-name')?.value||'').trim()){ setSaveStatus('Add a name to save', 'err'); return; }
+  setSaveStatus('Saving…');
+  autosaveTimer = setTimeout(flushAutosave, 700);
+}
+// someone is typing in a popup (or a save just went out) — don't redraw it under them
+function modalBusy(){
+  const a = document.activeElement;
+  const typing = a && $('#modal').contains(a) && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName);
+  return typing || !!autosaveTimer || Date.now()-lastAutosaveAt < 4000;
+}
+// ---- new-lead draft (kept on this device until the lead is added) ----
+let leadJustAdded = false;
+function saveLeadDraft(){
+  if(formLeadId || leadJustAdded || !$('#f-name')) return;
+  const vals = {};
+  DRAFT_IDS.forEach(id=>{ const e = $('#'+id); if(!e) return; vals[id] = e.type==='checkbox' ? e.checked : e.value; });
+  const empty = DRAFT_IDS.every(id=>{ const v = vals[id]; return v==null || v===false || v==='' || (id==='f-stage' && v==='new') || (id==='f-channel'); });
+  lsSet(LEAD_DRAFT_KEY, empty ? null : JSON.stringify({ vals, at:Date.now() }));
+}
+function restoreLeadDraft(form){
+  let dr = null; try{ dr = JSON.parse(lsGet(LEAD_DRAFT_KEY)||'null'); }catch(e){}
+  if(!dr || !dr.vals || Date.now()-dr.at > 14*864e5) return;
+  Object.entries(dr.vals).forEach(([id, v])=>{
+    const e = $('#'+id); if(!e) return;
+    if(id==='f-stage' && v==='won') return;
+    if(e.type==='checkbox') e.checked = !!v; else e.value = v;
+    if(id==='f-channel' || id==='f-offhours') e.dispatchEvent(new Event('change'));
+  });
+  const head = form.querySelector('.modal-head');
+  const banner = el('div',{class:'draft-banner'}, el('span',{}, 'Picked up where you left off'),
+    el('button',{class:'link-btn', onclick:()=>{ lsSet(LEAD_DRAFT_KEY, null); openModal(); }}, 'Start over'));
+  head.after(banner);
+}
+function clearLeadDraft(){ lsSet(LEAD_DRAFT_KEY, null); leadJustAdded = true; }
+// ---- note drafts per lead; a typed note is added automatically when the lead is closed ----
+function noteDraftKey(id){ return 'np_note_'+id; }
+async function autoAddNote(leadId, txt){
+  const lead = leads.find(l=>l.id===leadId); if(!lead || !txt) return;
+  const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
+  const entry = {text:txt, by:currentUser.id, byName:currentUser.name, at:Date.now()};
+  const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
+  if(error){ showToast("Note not saved — it's still there next time you open the lead"); return; }
+  lead.noteLog = [...current, entry];
+  lsSet(noteDraftKey(leadId), null);
+  showToast('Note saved');
+}
+
 function openAdd(){ state.adding = true; state.editingId = null; openModal(); }
 function openEdit(id){ state.adding = false; state.editingId = id; openModal(); }
 function closeModal(){
+  const noteLeadId = formLeadId || state.apptId;
+  const noteTxt = ($('#f-newnote')?.value||'').trim();
+  if(formLeadId) flushAutosave();
+  else saveLeadDraft();
+  if(noteLeadId && noteTxt) autoAddNote(noteLeadId, noteTxt);
+  formLeadId = null;
   $('#overlay').hidden = true; $('#modal').innerHTML = '';
   state.adding=false; state.editingId=null; state.confirmingDeleteId=null; state.apptId=null;
   activeBlocksQuery = null;
@@ -1545,6 +1670,7 @@ function openModal(){
   const overlay = $('#overlay'), modal = $('#modal');
   modal.innerHTML = '';
   const lead = state.editingId ? leads.find(l=>l.id===state.editingId) : null;
+  if(formLeadId){ clearTimeout(autosaveTimer); autosaveTimer = null; const prev = leads.find(l=>l.id===formLeadId); queueLeadSave(prev, captureLeadForm(prev)); }
 
   const form = el('div',{class:'modal'});
   form.append(el('div',{class:'modal-head'},
@@ -1579,6 +1705,7 @@ function openModal(){
     } else {
       pendingWonDetails = null;
     }
+    if(lead) scheduleAutosave(); else saveLeadDraft();
   });
 
   const chanF = el('select',{id:'f-channel'});
@@ -1663,10 +1790,26 @@ function openModal(){
       actions.append(el('button',{class:'link-btn', onclick:()=>{ state.confirmingDeleteId=lead.id; openModal(); }}, 'Delete lead'));
     }
   } else { actions.append(el('span',{})); }
-  actions.append(el('button',{class:'btn btn-primary', onclick:()=>saveLead(lead)}, lead ? 'Save changes' : 'Add lead'));
+  if(lead){
+    actions.append(el('span',{class:'save-wrap'}, el('span',{id:'saveStatus', class:'save-status ok'}, 'Changes save automatically'),
+      el('button',{class:'btn btn-primary', onclick:closeModal}, 'Done')));
+  } else {
+    actions.append(el('span',{class:'save-wrap'}, el('span',{class:'save-status'}, 'Draft kept if you close'),
+      el('button',{class:'btn btn-primary', onclick:()=>saveLead(lead)}, 'Add lead')));
+  }
   form.append(actions);
 
   modal.append(form);
+  formLeadId = lead ? lead.id : null;
+  leadJustAdded = false;
+  if(lead){
+    const onEdit = e=>{ if(AUTO_IDS.includes(e.target.id)) scheduleAutosave(); };
+    form.addEventListener('input', onEdit); form.addEventListener('change', onEdit);
+  } else {
+    restoreLeadDraft(form);
+    const onDraft = e=>{ if(DRAFT_IDS.includes(e.target.id)) saveLeadDraft(); };
+    form.addEventListener('input', onDraft); form.addEventListener('change', onDraft);
+  }
   overlay.hidden = false;
   overlay.onclick = (e)=>{ if(e.target===overlay) closeModal(); };
   if(!lead && !matchMedia('(pointer:coarse)').matches) setTimeout(()=>nameF.focus(), 50);
@@ -1719,6 +1862,7 @@ async function saveLead(existing, opts={}){
       data.created_at = Date.now(); data.created_by = currentUser.id; data.created_by_name = currentUser.name;
       const { data: row, error } = await sb.from('leads').insert(data).select().single();
       if(error) throw error;
+      clearLeadDraft();
       notifyNewLead(data);
       if(data.channel==='service' && pendingSvcFiles.length){
         const files = await uploadServiceFiles(pendingSvcFiles);
@@ -1853,6 +1997,7 @@ async function addNote(lead){
   if(error){ showToast("Couldn't add that note"); return; }
   showToast('Note added');
   lead.noteLog = [...current, entry];
+  lsSet(noteDraftKey(lead.id), null); ta.value = '';
   if(state.apptId) openApptSheet(lead.id); else openModal();
 }
 function buildNotesSection(lead){
@@ -1865,7 +2010,9 @@ function buildNotesSection(lead){
   }
   if(entries.length===0 && !lead.notes){ log.append(el('div',{class:'empty-note'}, 'No notes yet')); }
   box.append(log);
-  const ta = el('textarea',{id:'f-newnote', placeholder:'Add a note...'});
+  const ta = el('textarea',{id:'f-newnote', placeholder:'Add a note... (saves automatically when you close)'});
+  ta.value = lsGet(noteDraftKey(lead.id)) || '';
+  ta.addEventListener('input', ()=>lsSet(noteDraftKey(lead.id), ta.value.trim() ? ta.value : null));
   box.append(el('div',{class:'add-note-row'}, ta, el('button',{class:'btn', onclick:()=>addNote(lead)}, 'Add')));
   return box;
 }
