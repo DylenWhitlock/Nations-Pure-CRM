@@ -924,7 +924,7 @@ body{
       <div class="panel-head">
         <div>
           <h2>Leaderboard</h2>
-          <div class="panel-sub">Ranked by deals won this month</div>
+          <div class="panel-sub">All time · ranked by deals won · tap a name for details</div>
         </div>
       </div>
       <div id="leaderboard"></div>
@@ -1297,6 +1297,12 @@ function fmtMoney(n){
   if(n==null || isNaN(n)) return '$0';
   return '$'+Math.round(n).toLocaleString('en-US');
 }
+// A deal only counts once it's marked Won or Lost. Appointments still Scheduled (future, or past with no
+// outcome yet) are left out of appointment counts and close rates. A lost lead that never had an
+// appointment isn't counted either. Its date is the appointment date (or the day it was marked won).
+function isDecided(l){ return l.stage==='won' || (l.stage==='lost' && !!l.apptDate); }
+function decidedDay(l){ return l.apptDate || ymd(new Date(l.updatedAt||l.createdAt||0)); }
+function needsOutcome(l){ return !!l.apptDate && l.apptDate<todayStr() && !['won','lost'].includes(l.stage); }
 function renderAnalytics(){
   if(!currentUser) return;
   if(currentUser.role==='rep'){ renderRepAnalytics(); return; }
@@ -1305,12 +1311,14 @@ function renderAnalytics(){
   const roster = Array.from(new Set([...REP_SUGGESTIONS, ...cl.map(l=>l.assignedRep).filter(Boolean)]));
   const allRows = roster.map(rep=>{
     const mine = cl.filter(l=>l.assignedRep===rep);
-    const appts = mine.filter(l=>l.apptDate).length;
+    const appts = mine.filter(isDecided).length;
     const won = mine.filter(l=>l.stage==='won');
+    const lost = appts - won.length;
+    const pending = mine.filter(needsOutcome).length;
     const totalRevenue = won.reduce((sum,l)=>sum+(Number(l.salePrice)||0),0);
     const conversion = appts>0 ? (won.length/appts*100) : 0;
     const avgSale = won.length>0 ? totalRevenue/won.length : 0;
-    return { rep, appts, wonCount:won.length, conversion, avgSale, totalRevenue };
+    return { rep, appts, wonCount:won.length, lost, pending, conversion, avgSale, totalRevenue };
   }).sort((a,b)=> b.wonCount-a.wonCount || b.totalRevenue-a.totalRevenue);
   const rows = allRows.filter(r=>!isFormerRep(r.rep));
 
@@ -1321,13 +1329,15 @@ function renderAnalytics(){
   const overallAvg = totalWon>0 ? totalRevenue/totalWon : 0;
 
   const kpis = $('#analyticsKpis'); kpis.innerHTML = '';
+  const pendingAll = allRows.reduce((s,r)=>s+r.pending,0);
   kpis.append(
     statTile(fmtMoney(totalRevenue), 'Total revenue'),
     statTile(totalWon, 'Deals won', {cls:'good'}),
-    statTile(totalAppts, 'Appointments'),
-    statTile(overallConv.toFixed(0)+'%', 'Appt → sale'),
+    statTile(totalAppts, 'Appts run', {sub:'Won + lost'}),
+    statTile(totalAppts ? overallConv.toFixed(0)+'%' : '—', 'Close rate'),
     statTile(fmtMoney(overallAvg), 'Avg sale'),
   );
+  if(pendingAll) kpis.append(statTile(pendingAll, 'Need won/lost', {cls:'warn', sub:'Past appts with no outcome — not counted yet'}));
 
   const board = $('#leaderboard'); board.innerHTML = '';
   if(rows.every(r=>r.appts===0 && r.wonCount===0)){
@@ -1341,7 +1351,7 @@ function renderAnalytics(){
       el('div',{class:'lb-main'},
         el('div',{class:'lb-name'}, r.rep, el('span',{class:'lb-go', html:'<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>'})),
         el('div',{class:'lb-meter'}, el('div',{class:'lb-meter-fill', style:'width:'+pct+'%;'})),
-        el('div',{class:'lb-sub'}, r.wonCount+' won · '+r.appts+' appts · '+r.conversion.toFixed(0)+'% conversion')
+        el('div',{class:'lb-sub'}, r.wonCount+' won · '+r.lost+' lost · '+(r.appts?r.conversion.toFixed(0)+'% close':'no results yet')+(r.pending?' · '+r.pending+' need won/lost':''))
       ),
       el('div',{class:'lb-money'},
         el('div',{class:'lb-money-big'}, fmtMoney(r.totalRevenue)),
@@ -3316,7 +3326,7 @@ function renderSourceTable(){
     const k = (l.leadSource||'').trim() || 'Not set';
     const g = groups[k] = groups[k] || { source:k, leads:0, appts:0, won:0, revenue:0 };
     g.leads++;
-    if(l.apptDate) g.appts++;
+    if(isDecided(l)) g.appts++;
     if(l.stage==='won'){ g.won++; g.revenue += Number(l.salePrice)||0; }
   });
   const rows = Object.values(groups).sort((a,b)=> (a.source==='Not set')-(b.source==='Not set') || b.revenue-a.revenue || b.won-a.won || b.leads-a.leads);
@@ -3358,17 +3368,17 @@ function openRepAppts(rep){
     list.innerHTML = ''; summary.innerHTML = '';
     if(failed){ list.append(el('div',{class:'empty-note'}, "Couldn't load appointments. Try again.")); return; }
     if(!rows) { list.append(el('div',{class:'empty-note'}, 'Loading…')); return; }
-    const ran = rows.filter(l=>l.apptDate<=today && inRange(new Date(l.apptDate+'T12:00:00').getTime(), range));
+    const ran = rows.filter(l=>isDecided(l) && inRange(new Date(l.apptDate+'T12:00:00').getTime(), range));
+    const pending = rows.filter(needsOutcome);
     const won = ran.filter(l=>l.stage==='won');
     const rev = won.reduce((s,l)=>s+(Number(l.salePrice)||0),0);
     const upcoming = rows.filter(l=>l.apptDate>today).length;
     [[String(ran.length),'Appts run'],[String(won.length),'Won'],[ran.length?Math.round(won.length/ran.length*100)+'%':'—','Close rate'],[fmtMoney(rev),'Revenue']]
       .forEach(([v,k])=>summary.append(el('div',{class:'ra-kpi'}, el('div',{class:'v'}, v), el('div',{class:'k'}, k))));
-    if(!ran.length){ list.append(el('div',{class:'empty-note'}, 'No appointments run in this period')); }
+    if(!ran.length){ list.append(el('div',{class:'empty-note'}, 'No won or lost deals in this period')); }
     ran.forEach(l=>{
       const outcome = l.stage==='won' ? el('span',{class:'badge badge-appt'}, 'Won'+(l.salePrice?' · '+fmtMoney(l.salePrice):''))
-        : l.stage==='lost' ? el('span',{class:'badge badge-warn'}, 'Lost')
-        : el('span',{class:'badge badge-time'}, 'Open');
+        : el('span',{class:'badge badge-warn'}, 'Lost');
       const when = parseYmd(l.apptDate).toLocaleDateString('en-US',{weekday:'short', month:'short', day:'numeric'})+(l.apptStart?' · '+slotLabel(l.apptStart):'');
       const sub = [cityFromAddress(l.address), l.stage==='won' ? l.systemName : '', leadChannel(l)==='service' ? 'Service' : ''].filter(Boolean).join(' · ');
       const inBoard = leads.some(x=>x.id===l.id);
@@ -3376,7 +3386,10 @@ function openRepAppts(rep){
         el('div',{class:'ra-main'}, el('div',{class:'ra-name'}, l.name||'Customer'), el('div',{class:'ra-sub'}, when+(sub?' · '+sub:''))),
         outcome));
     });
-    if(upcoming) list.append(el('div',{class:'attrib', style:'margin-top:8px;'}, upcoming+' upcoming appointment'+(upcoming===1?'':'s')+' not shown'));
+    const notes = [];
+    if(pending.length) notes.push(pending.length+' past appointment'+(pending.length===1?'':'s')+' still need won/lost ('+pending.slice(0,4).map(l=>l.name||'Customer').join(', ')+(pending.length>4?'…':'')+') — not counted until marked');
+    if(upcoming) notes.push(upcoming+' upcoming appointment'+(upcoming===1?'':'s')+' not shown');
+    notes.forEach(n=>list.append(el('div',{class:'attrib', style:'margin:8px 12px;'}, n)));
   }
   modal.append(el('div',{class:'modal'},
     el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, rep), el('div',{class:'sheet-sub'}, 'Appointments run · '+(isService()?'Service':'Installs'))),
@@ -3438,10 +3451,10 @@ async function buildSalesWorkbook(all, p, chan){
   const tsDay = ts=> ts ? ymd(new Date(ts)) : '';
   const inP = ds=> !!ds && ds>=p.a && ds<=p.b;
   const leadsC = all.filter(l=> chan==='both' || leadChannel(l)===chan);
-  const wonDay = l=> tsDay(l.updatedAt||l.createdAt);
-  const ran = l=> !!l.apptDate && l.apptDate<=today && inP(l.apptDate);
+  const wonDay = l=> decidedDay(l);
+  const ran = l=> isDecided(l) && inP(decidedDay(l));
   const isWon = l=> l.stage==='won' && inP(wonDay(l));
-  const isLost = l=> l.stage==='lost' && inP(tsDay(l.updatedAt||l.createdAt));
+  const isLost = l=> l.stage==='lost' && isDecided(l) && inP(decidedDay(l));
   const price = l=> Number(l.salePrice)||0;
   const chanLabel = chan==='both' ? 'Installs + Service' : chan==='service' ? 'Service' : 'Installs';
   const stageLabel = id=> (STAGES.find(s=>s.id===id)||{}).label || id || '';
@@ -3471,7 +3484,7 @@ async function buildSalesWorkbook(all, p, chan){
   ws1.columns = [{width:22},{width:16},{width:15},{width:10},{width:10},{width:12},{width:15},{width:13}];
   const roster = Array.from(new Set([...REP_SUGGESTIONS, ...leadsC.map(l=>l.assignedRep).filter(Boolean)]));
   const H1 = 4;
-  ws1.getRow(H1).values = ['Water specialist','Leads assigned','Appointments','Won','Lost','Close rate','Revenue','Avg sale'];
+  ws1.getRow(H1).values = ['Water specialist','Leads assigned','Appts run','Won','Lost','Close rate','Revenue','Avg sale'];
   header(ws1, H1);
   let r = H1+1;
   [...roster, ''].forEach(rep=>{
@@ -3498,8 +3511,10 @@ async function buildSalesWorkbook(all, p, chan){
   r += 2;
   ws1.getCell(r,1).value = 'New leads in period'; ws1.getCell(r,2).value = leadsC.filter(l=>inP(tsDay(l.createdAt))).length; r++;
   ws1.getCell(r,1).value = 'Not yet assigned'; ws1.getCell(r,2).value = unassigned; r++;
-  ws1.getCell(r,1).value = 'Upcoming appointments'; ws1.getCell(r,2).value = leadsC.filter(l=>l.apptDate && l.apptDate>today && !['won','lost'].includes(l.stage)).length;
-  [r-2,r-1,r].forEach(i=> ws1.getCell(i,1).font = { color:{argb:'FF555555'} });
+  ws1.getCell(r,1).value = 'Upcoming appointments'; ws1.getCell(r,2).value = leadsC.filter(l=>l.apptDate && l.apptDate>=today && !['won','lost'].includes(l.stage)).length; r++;
+  ws1.getCell(r,1).value = 'Past appts needing won/lost'; ws1.getCell(r,2).value = leadsC.filter(needsOutcome).length; r++;
+  ws1.getCell(r,1).value = 'Appts run and close rate only count deals marked won or lost.';
+  [r-4,r-3,r-2,r-1,r].forEach(i=> ws1.getCell(i,1).font = { color:{argb:'FF555555'} });
   ws1.views = [{ showGridLines:false, state:'frozen', ySplit:H1 }];
 
   /* ---- Monthly trend ---- */
@@ -3516,14 +3531,14 @@ async function buildSalesWorkbook(all, p, chan){
   const nCols = 7 + reps2.length;
   titleBlock(ws2, 'Monthly Sales', Math.max(nCols,7));
   ws2.columns = [{width:14},{width:11},{width:13},{width:9},{width:14},{width:11},{width:12}, ...reps2.map(()=>({width:16}))];
-  ws2.getRow(4).values = ['Month','New leads','Appointments','Won','Revenue','Close rate','Avg sale', ...reps2.map(n=>n.split(' ')[0]+' revenue')];
+  ws2.getRow(4).values = ['Month','New leads','Appts run','Won','Revenue','Close rate','Avg sale', ...reps2.map(n=>n.split(' ')[0]+' revenue')];
   header(ws2, 4);
   r = 5;
   months.forEach(mo=>{
     const inM = ds=> !!ds && ds.slice(0,7)===mo && inP(ds);
     const won = leadsC.filter(l=>l.stage==='won' && inM(wonDay(l)));
     ws2.getRow(r).values = [xlDate(mo+'-01'), leadsC.filter(l=>inM(tsDay(l.createdAt))).length,
-      leadsC.filter(l=>l.apptDate && l.apptDate<=today && inM(l.apptDate)).length, won.length, won.reduce((s,l)=>s+price(l),0), null, null,
+      leadsC.filter(l=>isDecided(l) && inM(decidedDay(l))).length, won.length, won.reduce((s,l)=>s+price(l),0), null, null,
       ...reps2.map(rep=> won.filter(l=>l.assignedRep===rep).reduce((s,l)=>s+price(l),0))];
     ws2.getCell(r,6).value = { formula:`IF(C${r}=0,"",D${r}/C${r})` };
     ws2.getCell(r,7).value = { formula:`IF(D${r}=0,"",E${r}/D${r})` };
@@ -3547,13 +3562,13 @@ async function buildSalesWorkbook(all, p, chan){
   const ws3 = wb.addWorksheet('Lead Sources', { views:[{ showGridLines:false }] });
   titleBlock(ws3, 'Lead Sources', 7);
   ws3.columns = [{width:24},{width:10},{width:13},{width:9},{width:11},{width:14},{width:12}];
-  ws3.getRow(4).values = ['Source','Leads','Appointments','Won','Close rate','Revenue','Avg sale'];
+  ws3.getRow(4).values = ['Source','Leads','Appts run','Won','Close rate','Revenue','Avg sale'];
   header(ws3, 4);
   const groups = {};
   leadsC.filter(l=>inP(tsDay(l.createdAt))).forEach(l=>{
     const k = (l.leadSource||'').trim() || 'Not set';
     const g = groups[k] = groups[k] || { k, n:0, a:0, w:0, rev:0 };
-    g.n++; if(l.apptDate) g.a++; if(l.stage==='won'){ g.w++; g.rev += price(l); }
+    g.n++; if(isDecided(l)) g.a++; if(l.stage==='won'){ g.w++; g.rev += price(l); }
   });
   const srcRows = Object.values(groups).sort((x,y)=> (x.k==='Not set')-(y.k==='Not set') || y.rev-x.rev || y.n-x.n);
   r = 5;
@@ -3675,8 +3690,9 @@ function inRange(ts, range){
 }
 function renderRepAnalytics(){
   const mine = chanLeads(myLeads());
-  const appts = mine.filter(l=>l.apptDate && (l.apptDate<todayStr() || ['won','lost'].includes(l.stage)) && inRange(new Date(l.apptDate+'T12:00:00').getTime(), repRange));
-  const won = mine.filter(l=>l.stage==='won' && inRange(l.updatedAt||l.createdAt, repRange));
+  const appts = mine.filter(l=>isDecided(l) && inRange(new Date(decidedDay(l)+'T12:00:00').getTime(), repRange));
+  const won = appts.filter(l=>l.stage==='won');
+  const pending = mine.filter(needsOutcome).length;
   const revenue = won.reduce((s,l)=>s+(Number(l.salePrice)||0),0);
   const close = appts.length ? Math.round(won.length/appts.length*100) : 0;
   const upcoming = mine.filter(l=>l.apptDate && l.apptDate>todayStr()).length;
@@ -3686,8 +3702,9 @@ function renderRepAnalytics(){
     [String(won.length), 'Deals won'],
     [appts.length ? close+'%' : '—', 'Close rate'],
     [won.length ? fmtMoney(revenue/won.length) : '—', 'Avg sale'],
-    [String(appts.length), 'Appointments run'],
+    [String(appts.length), 'Appts run (won + lost)'],
     [String(upcoming), 'Upcoming appts'],
+    ...(pending ? [[String(pending), 'Need won/lost']] : []),
   ].forEach(([v,l])=>kpis.append(el('div',{class:'kpi'}, el('div',{class:'kpi-v'}, v), el('div',{class:'kpi-l'}, l))));
   const wins = $('#repWins'); wins.innerHTML = '';
   const recent = mine.filter(l=>l.stage==='won').sort((a,b)=>(b.updatedAt||0)-(a.updatedAt||0)).slice(0,8);

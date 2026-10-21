@@ -52,11 +52,14 @@ function buildBrief(leads, blocks) {
 
   // Month to date (installs)
   const inM = d => d && d.slice(0, 7) === month && d <= today;
-  const mRan = L.filter(l => l.ch === 'install' && inM(l.appt_date) && l.appt_date < today);
-  const mWon = L.filter(l => l.ch === 'install' && l.stage === 'won' && inM(l.updated));
+  // only deals marked won or lost count (same rule as the CRM's Analytics tab)
+  const decided = l => l.stage === 'won' || (l.stage === 'lost' && !!l.appt_date);
+  const dDay = l => l.appt_date || l.updated;
+  const mRan = L.filter(l => l.ch === 'install' && decided(l) && inM(dDay(l)));
+  const mWon = mRan.filter(l => l.stage === 'won');
   const mRev = mWon.reduce((s, l) => s + l.price, 0);
   out.push('', 'MONTH TO DATE (installs)');
-  out.push(`${money(mRev)} revenue · ${mWon.length} sold · ${mRan.length} appts · ${pct(mWon.length, mRan.length)} close · ${mWon.length ? money(mRev / mWon.length) : '—'} avg`);
+  out.push(`${money(mRev)} revenue · ${mWon.length} won · ${mRan.length - mWon.length} lost · ${pct(mWon.length, mRan.length)} close · ${mWon.length ? money(mRev / mWon.length) : '—'} avg`);
   const reps = [...new Set([...mRan, ...mWon].map(l => l.assigned_rep).filter(r => r && !FORMER_REPS.includes(r.trim().toLowerCase())))];
   reps.map(r => {
     const ran = mRan.filter(l => l.assigned_rep === r).length, won = mWon.filter(l => l.assigned_rep === r);
