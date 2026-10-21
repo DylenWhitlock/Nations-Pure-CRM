@@ -189,3 +189,26 @@ begin
 end $$;
 revoke all on function public.morning_brief(text) from public;
 grant execute on function public.morning_brief(text) to anon, authenticated;
+
+-- Water test + customer water report (run once in Supabase → SQL Editor)
+alter table leads add column if not exists water_test jsonb;
+alter table leads add column if not exists report_token text;
+create unique index if not exists leads_report_token_idx on leads (report_token) where report_token is not null;
+
+create or replace function public.water_report(p_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare l leads; parts text[]; n int; city text := '';
+begin
+  if p_token is null or length(p_token) < 24 then return null; end if;
+  select * into l from leads where report_token = p_token;
+  if not found or l.water_test is null then return null; end if;
+  parts := string_to_array(l.address, ',');
+  n := coalesce(array_length(parts, 1), 0);
+  if n >= 3 then city := trim(parts[n-1]); elsif n = 2 then city := trim(parts[2]); end if;
+  city := trim(regexp_replace(city, '\s*(TX|Texas)?\s*\d{5}(-\d{4})?\s*$', '', 'i'));
+  if city ~* '^(tx|texas)$' then city := ''; end if;
+  return jsonb_build_object('first', split_part(trim(l.name), ' ', 1), 'city', city,
+    'rep', l.assigned_rep, 'test', l.water_test);
+end $$;
+revoke all on function public.water_report(text) from public;
+grant execute on function public.water_report(text) to anon, authenticated;

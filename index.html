@@ -413,6 +413,27 @@ button.ra-row{cursor:pointer;} button.ra-row:hover{background:var(--surface-2);}
 .outcome-row .btn.on.lost{background:var(--danger-soft); border-color:var(--danger); color:var(--danger);}
 .sheet-sub{font-size:12.5px; color:var(--text-muted); margin-top:3px;}
 .sec-lbl{font-size:12px; font-weight:700; color:var(--text-muted);}
+.wt-card{border:1px solid var(--border); border-radius:10px; padding:12px; display:flex; flex-direction:column; gap:10px;}
+.wt-empty{display:flex; align-items:center; justify-content:space-between; gap:10px;}
+.wt-title{font-size:14px; font-weight:800;}
+.wt-when{font-weight:600; color:var(--text-muted); font-size:12px;}
+.wt-sub{font-size:12px; color:var(--text-muted); margin-top:2px;}
+.wt-chips{display:flex; flex-wrap:wrap; gap:6px;}
+.wt-chip{font-size:12px; font-weight:700; padding:4px 9px; border-radius:999px; background:var(--surface-2);}
+.wt-chip.good, .wt-rate.good{color:var(--success);} .wt-chip.good{background:var(--success-soft);}
+.wt-chip.watch, .wt-rate.watch{color:var(--warning);} .wt-chip.watch{background:var(--warning-soft);}
+.wt-chip.high, .wt-rate.high{color:var(--danger);} .wt-chip.high{background:var(--danger-soft);}
+.wt-acts{display:flex; flex-wrap:wrap; gap:8px;} .wt-acts .btn{text-decoration:none;}
+.wt-grid{display:grid; grid-template-columns:repeat(auto-fill, minmax(140px,1fr)); gap:10px;}
+.wt-field{display:flex; flex-direction:column; gap:5px;}
+.wt-field label{font-size:12px; font-weight:700; color:var(--text-muted);}
+.wt-field input{border:1px solid var(--border); border-radius:9px; padding:10px 11px; font-size:18px; font-weight:700; font-family:inherit; background:var(--bg); color:var(--text); width:100%;}
+.wt-rate{font-size:11.5px; font-weight:700; min-height:15px;}
+.wt-recs{display:flex; flex-wrap:wrap; gap:6px;}
+.wt-rec{border:1px solid var(--border); background:var(--surface); color:var(--text-muted); font:inherit; font-size:13px; font-weight:700; padding:8px 12px; border-radius:999px; cursor:pointer;}
+.wt-rec.on{background:var(--accent-soft); border-color:var(--accent); color:var(--accent-strong);}
+#wt-note{border:1px solid var(--border); border-radius:9px; padding:10px 11px; font:inherit; font-size:14px; background:var(--bg); color:var(--text); width:100%; min-height:60px; resize:vertical;}
+@media (max-width:640px){ #wt-note{font-size:16px;} }
 
 /* rep analytics */
 .kpi-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:10px;}
@@ -1190,7 +1211,7 @@ function mapLead(r){
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
     createdAt:toMs(r.created_at), updatedAt:toMs(r.updated_at),
-    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
+    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', waterTest:r.water_test||null, reportToken:r.report_token||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
   };
 }
 async function fetchLeads(){
@@ -1680,6 +1701,7 @@ function openModal(){
 
   if(lead){ const qa = contactActions(lead); if(qa) form.append(qa); }
   if(lead && lead.address){ const propCard = buildPropertyCard(lead); if(propCard) form.append(propCard); }
+  if(lead) form.append(buildWaterCard(lead));
 
   const nameF = el('input',{type:'text', id:'f-name', placeholder:'Customer name'}); nameF.value = lead?.name||'';
   const phoneF = el('input',{type:'tel', id:'f-phone', placeholder:'(214) 555-0100'}); phoneF.value = lead?.phone||'';
@@ -2520,6 +2542,140 @@ async function clearAppointment(lead){
   }catch(err){ showToast("Couldn't change that appointment"); }
 }
 
+/* ================= WATER TEST → CUSTOMER WATER REPORT =================
+   The rep enters test results at the appointment. The CRM rates each one against EPA / WQA guidelines,
+   suggests systems (the rep can change them), and makes a private report page for the homeowner
+   (report.html?r=<token>) that the rep can text from their phone. */
+const WT_FIELDS = [
+  { id:'hardness', label:'Hardness', unit:'gpg', step:'0.1' },
+  { id:'iron', label:'Iron', unit:'ppm', step:'0.01' },
+  { id:'tds', label:'TDS', unit:'ppm', step:'1' },
+  { id:'chlorine', label:'Chlorine', unit:'ppm', step:'0.1' },
+  { id:'ph', label:'pH', unit:'', step:'0.1' },
+];
+const WT_SYSTEMS = [
+  { id:'softener', label:'Water softener' },
+  { id:'iron', label:'Iron filter' },
+  { id:'carbon', label:'Whole-home carbon filter' },
+  { id:'ro', label:'Reverse osmosis drinking water' },
+  { id:'neutralizer', label:'Acid neutralizer' },
+];
+function hardnessClass(g){ return g<1 ? 'Soft' : g<3.5 ? 'Slightly hard' : g<7 ? 'Moderately hard' : g<10.5 ? 'Hard' : 'Very hard'; }
+function wtRate(id, v){
+  if(v==null || v==='' || isNaN(v)) return null;
+  v = Number(v);
+  switch(id){
+    case 'hardness': return { level: v<3.5?'good':v<7?'watch':'high', text: hardnessClass(v) };
+    case 'iron': return v<0.3 ? {level:'good', text:'Within EPA guideline'} : {level:'high', text:'Above EPA guideline (0.3)'};
+    case 'tds': return v<300 ? {level:'good', text:'Good'} : v<=500 ? {level:'watch', text:'Fair'} : {level:'high', text:'Above EPA guideline (500)'};
+    case 'chlorine': return v<=0.2 ? {level:'good', text:'Little to none'} : {level:'watch', text:'Treated with chlorine'};
+    case 'ph': return v<6.5 ? {level:'high', text:'Acidic (below 6.5)'} : v>8.5 ? {level:'watch', text:'Alkaline (above 8.5)'} : {level:'good', text:'Normal'};
+  }
+  return null;
+}
+function wtSuggest(t){
+  const s = new Set(), n = k=>Number(t[k]);
+  if(t.hardness!=='' && n('hardness')>=3.5) s.add('softener');
+  if(t.iron!=='' && n('iron')>=0.3) s.add('iron');
+  if(t.chlorine!=='' && n('chlorine')>0.2) s.add('carbon');
+  if(t.tds!=='' && n('tds')>=250) s.add('ro');
+  if(t.ph!=='' && n('ph')<6.5) s.add('neutralizer');
+  return [...s];
+}
+function reportUrl(token){ return location.origin+'/report.html?r='+token; }
+function newReportToken(){ const b = new Uint8Array(16); crypto.getRandomValues(b); return [...b].map(x=>x.toString(16).padStart(2,'0')).join(''); }
+function reopenLead(id){ closeModal(); if(isRepUser() || state.apptReturn){ state.apptReturn = false; openApptSheet(id); } else openEdit(id); }
+function reportTextBody(lead){
+  const first = (lead.name||'').trim().split(/\s+/)[0];
+  return (first ? 'Hi '+first+', h' : 'H')+"ere's your water report from Nation's Pure: "+reportUrl(lead.reportToken);
+}
+function smsToCustomer(lead){
+  const num = (lead.phone||'').replace(/[^\d+]/g,'');
+  const body = encodeURIComponent(reportTextBody(lead));
+  return 'sms:'+num+(/iPhone|iPad|Mac/.test(navigator.userAgent) ? '&' : '?')+'body='+body;
+}
+// small card shown on the lead / appointment
+function buildWaterCard(lead){
+  const box = el('div',{class:'wt-card'});
+  const t = lead.waterTest;
+  if(!t){
+    box.append(el('div',{class:'wt-empty'},
+      el('div',{}, el('div',{class:'wt-title'}, 'Water test'), el('div',{class:'wt-sub'}, 'Enter results and send the customer their report')),
+      el('button',{class:'btn btn-primary', onclick:()=>openWaterTest(lead)}, 'Start test')));
+    return box;
+  }
+  const chips = el('div',{class:'wt-chips'});
+  WT_FIELDS.forEach(f=>{ const r = wtRate(f.id, t[f.id]); if(r) chips.append(el('span',{class:'wt-chip '+r.level}, f.label+' '+t[f.id]+(f.unit?' '+f.unit:''))); });
+  const acts = el('div',{class:'wt-acts'});
+  if(lead.reportToken){
+    if(lead.phone) acts.append(el('a',{class:'btn btn-primary', href:smsToCustomer(lead)}, 'Text to customer'));
+    acts.append(el('a',{class:'btn', href:reportUrl(lead.reportToken), target:'_blank', rel:'noopener'}, 'View report'));
+  }
+  acts.append(el('button',{class:'btn', onclick:()=>openWaterTest(lead)}, 'Edit'));
+  box.append(el('div',{class:'wt-title'}, 'Water test', el('span',{class:'wt-when'}, t.at ? ' · '+new Date(t.at).toLocaleDateString('en-US',{month:'short', day:'numeric'}) : '')), chips, acts);
+  return box;
+}
+function openWaterTest(lead){
+  if(formLeadId) flushAutosave();
+  state.apptReturn = !!state.apptId;
+  formLeadId = null;
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  const t = Object.assign({ source:'city', hardness:'', iron:'', tds:'', chlorine:'', ph:'', recs:null, note:'' }, lead.waterTest||{});
+  let recs = new Set(t.recs || wtSuggest(t)), touchedRecs = !!t.recs;
+  const src = el('div',{class:'seg'});
+  [['city','City water'],['well','Well water']].forEach(([v,lbl])=>{
+    const b = el('button',{type:'button', class:t.source===v?'on':''}, lbl);
+    b.onclick = ()=>{ t.source = v; src.querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b)); };
+    src.append(b);
+  });
+  const grid = el('div',{class:'wt-grid'});
+  const rateEls = {};
+  WT_FIELDS.forEach(f=>{
+    const inp = el('input',{type:'number', inputmode:'decimal', step:f.step, min:'0', placeholder:'—', id:'wt-'+f.id});
+    inp.value = t[f.id];
+    rateEls[f.id] = el('div',{class:'wt-rate'});
+    inp.addEventListener('input', ()=>{ t[f.id] = inp.value; paintRates(); if(!touchedRecs){ recs = new Set(wtSuggest(t)); paintRecs(); } });
+    grid.append(el('div',{class:'wt-field'}, el('label',{}, f.label+(f.unit?' ('+f.unit+')':'')), inp, rateEls[f.id]));
+  });
+  function paintRates(){ WT_FIELDS.forEach(f=>{ const r = wtRate(f.id, t[f.id]); rateEls[f.id].className = 'wt-rate'+(r?' '+r.level:''); rateEls[f.id].textContent = r ? r.text : ''; }); }
+  const recBox = el('div',{class:'wt-recs'});
+  function paintRecs(){
+    recBox.innerHTML = '';
+    WT_SYSTEMS.forEach(s=>{
+      const b = el('button',{type:'button', class:'wt-rec'+(recs.has(s.id)?' on':'')}, s.label);
+      b.onclick = ()=>{ touchedRecs = true; recs.has(s.id) ? recs.delete(s.id) : recs.add(s.id); paintRecs(); };
+      recBox.append(b);
+    });
+  }
+  const note = el('textarea',{id:'wt-note', placeholder:'Optional note for the customer (shows on their report)'}); note.value = t.note||'';
+  const msg = el('div',{class:'attrib'});
+  async function save(){
+    if(!WT_FIELDS.some(f=>t[f.id]!=='' && t[f.id]!=null)){ msg.textContent = 'Enter at least one result.'; return; }
+    const test = { source:t.source, recs:[...recs], note:note.value.trim(), at: lead.waterTest?.at || Date.now(), by: currentUser.name };
+    WT_FIELDS.forEach(f=>{ test[f.id] = t[f.id]==='' ? '' : Number(t[f.id]); });
+    const token = lead.reportToken || newReportToken();
+    msg.textContent = 'Saving…';
+    const { error } = await sb.from('leads').update({ water_test:test, report_token:token, updated_at:Date.now() }).eq('id', lead.id);
+    if(error){ console.error(error); msg.textContent = /column|schema/i.test(error.message||'') ? 'One-time setup needed in Supabase first (water report SQL).' : "Couldn't save. Check your connection."; return; }
+    lead.waterTest = test; lead.reportToken = token; lead.updatedAt = Date.now();
+    showToast('Water report ready');
+    reopenLead(lead.id);
+  }
+  paintRates(); paintRecs();
+  modal.append(el('div',{class:'modal'},
+    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, 'Water test'), el('div',{class:'sheet-sub'}, lead.name||'Customer')),
+      el('button',{class:'icon-btn', 'aria-label':'Close', onclick:()=>reopenLead(lead.id), html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
+    src, grid,
+    el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Recommended systems'), recBox),
+    el('div',{class:'field'}, note),
+    msg,
+    el('div',{class:'modal-actions'}, el('button',{class:'link-btn', onclick:()=>reopenLead(lead.id)}, 'Cancel'),
+      el('button',{class:'btn btn-primary', onclick:save}, 'Save & make report'))));
+  overlay.hidden = false;
+  overlay.onclick = e=>{ if(e.target===overlay) reopenLead(lead.id); };
+}
+
 /* ================= WORK ORDER BUILDER ================= */
 const PAGE_PX = {w:1275, h:1650};
 const PAGE_PT = {w:612, h:792};
@@ -3356,6 +3512,7 @@ function openApptSheet(id){
     form.append(el('div',{class:'lead-docs'}, el('div',{class:'lbl'}, 'Service PDFs'), serviceFilesList(lead, false)));
   }
 
+  form.append(buildWaterCard(lead));
   const outcome = el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Outcome'));
   const row = el('div',{class:'outcome-row'});
   [['won','Won'],['lost','Lost']].forEach(([id,label])=>{

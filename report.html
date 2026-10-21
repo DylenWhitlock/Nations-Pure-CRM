@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Your Water Report · Nation's Pure</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap">
+<style>
+:root{--ink:#14222B; --muted:#5D6B74; --line:#E3E8EB; --bg:#F5F8F9; --card:#fff; --teal:#1C97A3; --teal-d:#127581; --teal-s:#E7F6F5;
+  --good:#2E8B57; --good-s:#E9F7EF; --watch:#B7801C; --watch-s:#FDF3DF; --high:#C0544A; --high-s:#FBEAE8;}
+*{box-sizing:border-box; margin:0; padding:0;}
+body{font-family:Inter,-apple-system,'Segoe UI',sans-serif; background:var(--bg); color:var(--ink); line-height:1.45; -webkit-font-smoothing:antialiased;}
+.wrap{max-width:640px; margin:0 auto; padding:20px 16px 48px;}
+header{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:22px;}
+header img{height:44px;}
+header .tag{font-size:12px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.06em;}
+h1{font-size:28px; font-weight:800; letter-spacing:-.02em;}
+.for{color:var(--muted); font-size:14.5px; margin-top:4px;}
+.card{background:var(--card); border:1px solid var(--line); border-radius:16px; padding:18px; margin-top:16px;}
+.hard-top{display:flex; align-items:flex-end; justify-content:space-between; gap:12px;}
+.big{font-size:44px; font-weight:800; letter-spacing:-.03em; line-height:1;}
+.big small{font-size:16px; font-weight:700; color:var(--muted); margin-left:4px; letter-spacing:0;}
+.klass{font-size:18px; font-weight:800; text-align:right;}
+.klass span{display:block; font-size:12.5px; font-weight:600; color:var(--muted);}
+.scale{position:relative; margin:22px 0 6px;}
+.bar{display:grid; grid-template-columns:1fr 2.5fr 3.5fr 3.5fr 4.5fr; height:12px; border-radius:99px; overflow:hidden;}
+.bar i:nth-child(1){background:#BFE6E3} .bar i:nth-child(2){background:#9ED7CF} .bar i:nth-child(3){background:#F2D58C} .bar i:nth-child(4){background:#EDB07C} .bar i:nth-child(5){background:#E08A7E}
+.pin{position:absolute; top:-7px; width:26px; height:26px; margin-left:-13px; border-radius:50%; background:var(--ink); border:4px solid #fff; box-shadow:0 1px 4px rgba(0,0,0,.25);}
+.ticks{display:grid; grid-template-columns:1fr 2.5fr 3.5fr 3.5fr 4.5fr; font-size:10.5px; color:var(--muted); font-weight:600; margin-top:6px;}
+.ticks span{padding-right:4px;}
+h2{font-size:13px; font-weight:800; text-transform:uppercase; letter-spacing:.06em; color:var(--muted); margin-bottom:10px;}
+.row{display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px 0; border-top:1px solid var(--line);}
+.row:first-of-type{border-top:none; padding-top:0;}
+.row .k{font-weight:700;} .row .g{font-size:12px; color:var(--muted); margin-top:1px;}
+.row .r{text-align:right; flex:none;}
+.row .v{font-size:17px; font-weight:800;}
+.pill{display:inline-block; font-size:11.5px; font-weight:800; padding:3px 9px; border-radius:99px; margin-top:3px;}
+.good{color:var(--good); background:var(--good-s);} .watch{color:var(--watch); background:var(--watch-s);} .high{color:var(--high); background:var(--high-s);}
+.find{display:flex; gap:10px; padding:10px 0; border-top:1px solid var(--line); font-size:14.5px;}
+.find:first-of-type{border-top:none; padding-top:0;}
+.dot{width:10px; height:10px; border-radius:50%; flex:none; margin-top:6px;}
+.dot.watch{background:var(--watch);} .dot.high{background:var(--high);} .dot.good{background:var(--good);}
+.rec{display:flex; gap:12px; align-items:flex-start; padding:12px 0; border-top:1px solid var(--line);}
+.rec:first-of-type{border-top:none; padding-top:0;}
+.num{width:28px; height:28px; border-radius:50%; background:var(--teal-s); color:var(--teal-d); font-weight:800; font-size:13px; display:flex; align-items:center; justify-content:center; flex:none;}
+.rec b{display:block; font-size:15.5px;} .rec span{font-size:13.5px; color:var(--muted);}
+.note{background:var(--teal-s); border-radius:12px; padding:14px; font-size:14.5px; margin-top:16px; white-space:pre-wrap;}
+.note b{display:block; font-size:12px; text-transform:uppercase; letter-spacing:.06em; color:var(--teal-d); margin-bottom:4px;}
+footer{margin-top:26px; text-align:center; font-size:12.5px; color:var(--muted);}
+footer b{color:var(--ink);}
+.msg{text-align:center; padding:80px 16px; color:var(--muted);}
+@media print{ body{background:#fff;} .card{break-inside:avoid;} }
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="msg">Loading your water report…</div></div>
+<script src="config.js"></script>
+<script>
+(function(){
+  const $app = document.getElementById('app');
+  const esc = s=>String(s==null?'':s).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  const token = new URLSearchParams(location.search).get('r') || '';
+  const fail = t=>{ $app.innerHTML = '<div class="msg">'+esc(t)+'</div>'; };
+  if(token.length < 24) return fail("This report link isn't valid. Please ask your water specialist to resend it.");
+
+  const KLASS = g=> g<1 ? 'Soft' : g<3.5 ? 'Slightly hard' : g<7 ? 'Moderately hard' : g<10.5 ? 'Hard' : 'Very hard';
+  const RATE = {
+    hardness: v=>({level: v<3.5?'good':v<7?'watch':'high', text: KLASS(v)}),
+    iron: v=> v<0.3 ? {level:'good', text:'Good'} : {level:'high', text:'High'},
+    tds: v=> v<300 ? {level:'good', text:'Good'} : v<=500 ? {level:'watch', text:'Fair'} : {level:'high', text:'High'},
+    chlorine: v=> v<=0.2 ? {level:'good', text:'Low'} : {level:'watch', text:'Present'},
+    ph: v=> v<6.5 ? {level:'high', text:'Acidic'} : v>8.5 ? {level:'watch', text:'Alkaline'} : {level:'good', text:'Normal'},
+  };
+  const ROWS = [
+    ['hardness','Hardness','gpg','Minerals that cause scale. Soft is under 1 gpg.'],
+    ['iron','Iron','ppm','EPA guideline: 0.3 ppm or less.'],
+    ['tds','Total dissolved solids','ppm','EPA guideline: 500 ppm or less.'],
+    ['chlorine','Chlorine','ppm','Added by the city to disinfect water.'],
+    ['ph','pH','','Normal range is 6.5 to 8.5.'],
+  ];
+  const FIND = {
+    hardness: "Hard water leaves scale inside pipes, your water heater and fixtures. It's what causes spots on dishes and glass, and it keeps soap from lathering.",
+    iron: "Iron at this level can cause orange or brown stains on sinks, tubs and laundry, and a metallic taste.",
+    tds: "Total dissolved solids is everything dissolved in your water. Higher levels can affect taste and leave a film or residue.",
+    chlorine: "Your water is disinfected with chlorine. It's safe, but it's the taste and smell you notice, and it can dry out skin and hair.",
+    ph_low: "Acidic water can slowly corrode copper pipes and fixtures and leave blue-green stains.",
+    ph_high: "Alkaline water can taste bitter and add to scale buildup.",
+  };
+  const SYS = {
+    softener: ['Water softener', 'Removes hardness for the whole home: no more scale or spots.'],
+    iron: ['Iron filter', 'Takes out iron before it reaches your fixtures and laundry.'],
+    carbon: ['Whole-home carbon filter', 'Reduces chlorine taste and smell at every tap.'],
+    ro: ['Reverse osmosis drinking water', 'Purified water for drinking and cooking at the kitchen sink.'],
+    neutralizer: ['Acid neutralizer', 'Brings pH up to protect your plumbing.'],
+  };
+  const num = v=> v===''||v==null||isNaN(v) ? null : Number(v);
+
+  fetch(window.SUPABASE_URL.replace(/\/$/,'')+'/rest/v1/rpc/water_report', {
+    method:'POST', headers:{ apikey:window.SUPABASE_ANON_KEY, Authorization:'Bearer '+window.SUPABASE_ANON_KEY, 'Content-Type':'application/json' },
+    body: JSON.stringify({ p_token: token })
+  }).then(r=>r.ok ? r.json() : null).then(d=>{
+    if(!d || !d.test) return fail("We couldn't find this report. Please ask your water specialist to resend it.");
+    const t = d.test, h = num(t.hardness);
+    const when = new Date(Number(t.at)||Date.now()).toLocaleDateString('en-US',{month:'long', day:'numeric', year:'numeric'});
+    let html = '<header><img src="assets/nations-pure-logo.png" alt="Nation\'s Pure Water Systems"><div class="tag">Water Report</div></header>';
+    html += '<h1>'+(d.first ? esc(d.first)+'\'s water' : 'Your water')+'</h1>';
+    html += '<div class="for">'+[d.city, t.source==='well'?'Well water':'City water', when].filter(Boolean).map(esc).join(' · ')+'</div>';
+    if(h!=null){
+      const pos = Math.min(h, 15)/15*100;
+      html += '<div class="card"><div class="hard-top"><div><h2>Hardness</h2><div class="big">'+esc(h)+'<small>gpg</small></div></div>'
+        + '<div class="klass">'+esc(KLASS(h))+'<span>'+Math.round(h*17.1)+' mg/L</span></div></div>'
+        + '<div class="scale"><div class="bar"><i></i><i></i><i></i><i></i><i></i></div><div class="pin" style="left:'+pos+'%"></div></div>'
+        + '<div class="ticks"><span>Soft</span><span>Slightly</span><span>Moderate</span><span>Hard</span><span>Very hard</span></div></div>';
+    }
+    const rows = ROWS.filter(([k])=>num(t[k])!=null);
+    if(rows.length){
+      html += '<div class="card"><h2>Your results</h2>';
+      rows.forEach(([k,label,unit,guide])=>{ const v = num(t[k]), r = RATE[k](v);
+        html += '<div class="row"><div><div class="k">'+label+'</div><div class="g">'+guide+'</div></div><div class="r"><div class="v">'+esc(v)+(unit?' <small style="font-size:12px;color:var(--muted)">'+unit+'</small>':'')+'</div><span class="pill '+r.level+'">'+r.text+'</span></div></div>'; });
+      html += '</div>';
+    }
+    const finds = [];
+    if(h!=null && h>=3.5) finds.push([h>=7?'high':'watch', FIND.hardness]);
+    if(num(t.iron)!=null && num(t.iron)>=0.3) finds.push(['high', FIND.iron]);
+    if(num(t.tds)!=null && num(t.tds)>300) finds.push([num(t.tds)>500?'high':'watch', FIND.tds]);
+    if(num(t.chlorine)!=null && num(t.chlorine)>0.2) finds.push(['watch', FIND.chlorine]);
+    if(num(t.ph)!=null && num(t.ph)<6.5) finds.push(['high', FIND.ph_low]);
+    if(num(t.ph)!=null && num(t.ph)>8.5) finds.push(['watch', FIND.ph_high]);
+    html += '<div class="card"><h2>What this means</h2>';
+    html += finds.length ? finds.map(([lv,txt])=>'<div class="find"><span class="dot '+lv+'"></span><div>'+txt+'</div></div>').join('')
+      : '<div class="find"><span class="dot good"></span><div>Your results are within normal ranges.</div></div>';
+    html += '</div>';
+    const recs = (t.recs||[]).filter(k=>SYS[k]);
+    if(recs.length){
+      html += '<div class="card"><h2>Recommended for your home</h2>';
+      recs.forEach((k,i)=>{ html += '<div class="rec"><div class="num">'+(i+1)+'</div><div><b>'+SYS[k][0]+'</b><span>'+SYS[k][1]+'</span></div></div>'; });
+      html += '</div>';
+    }
+    if(t.note) html += '<div class="note"><b>From your water specialist</b>'+esc(t.note)+'</div>';
+    html += '<footer>Tested by <b>'+esc(d.rep||t.by||'your water specialist')+'</b><br>Nation\'s Pure Water Systems · Dallas–Fort Worth</footer>';
+    $app.innerHTML = html;
+  }).catch(()=>fail("We couldn't load this report. Please check your connection and try again."));
+})();
+</script>
+</body>
+</html>
