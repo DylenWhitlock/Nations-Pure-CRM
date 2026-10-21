@@ -1170,6 +1170,7 @@ async function fetchLeads(){
   leads = data.map(mapLead);
   render();
   if(state.editingId && !state.apptId) openModal();
+  cleanupStaleAppts();
 }
 async function fetchBrochures(){
   const { data, error } = await sb.from('brochures').select('*').order('uploaded_at',{ascending:false}).limit(200);
@@ -1447,6 +1448,35 @@ function askWonDetails(defaults){
     cancelBtn.onclick = ()=>{ cleanup(); resolve(null); };
   });
 }
+// Moving a lead back to New Lead / Awaiting Response means the appointment is off (rescheduling,
+// no-show, etc.): clear its date/time, free the slot on the calendar, and leave a note of what it was.
+function isPreApptStage(st){ return st==='new' || st==='awaiting'; }
+async function apptReleaseFields(lead, newStage){
+  if(!isPreApptStage(newStage) || !lead || !lead.apptDate) return null;
+  if(lead.assignedRep && lead.apptStart){
+    const { error } = await sb.from('blocks').delete().eq('id', blockDocId(lead.assignedRep, lead.apptDate, lead.apptStart));
+    if(error) console.error(error);
+  }
+  const was = parseYmd(lead.apptDate).toLocaleDateString('en-US',{month:'short', day:'numeric'})+(lead.apptStart?' '+slotLabel(lead.apptStart):'');
+  const stageName = (STAGES.find(x=>x.id===newStage)||{}).label || newStage;
+  const entry = { text:'Appointment cleared ('+was+(lead.assignedRep?' with '+lead.assignedRep:'')+') — moved to '+stageName,
+    by:currentUser.id, byName:currentUser.name, at:Date.now() };
+  return { appt_date:'', appt_start:'', note_log:[...(Array.isArray(lead.noteLog)?lead.noteLog:[]), entry] };
+}
+function applyRelease(lead, rel){ if(rel){ lead.apptDate = ''; lead.apptStart = ''; lead.noteLog = rel.note_log; } }
+// one-time tidy-up for leads already sitting in New/Awaiting with an old appointment on them
+let apptCleanupDone = false;
+async function cleanupStaleAppts(){
+  if(apptCleanupDone || !currentUser || currentUser.role==='rep') return;
+  apptCleanupDone = true;
+  const stale = leads.filter(l=>isPreApptStage(l.stage) && l.apptDate);
+  for(const l of stale){
+    const rel = await apptReleaseFields(l, l.stage);
+    const { error } = await sb.from('leads').update({ ...rel, updated_at:Date.now() }).eq('id', l.id);
+    if(!error) applyRelease(l, rel);
+  }
+  if(stale.length) render();
+}
 async function changeStage(lead, newStage, selectEl){
   if(newStage==='won'){
     const details = await askWonDetails({ salePrice: lead.salePrice, systemName: lead.systemName });
@@ -1458,10 +1488,12 @@ async function changeStage(lead, newStage, selectEl){
     showToast('Marked Won');
     return;
   }
-  const { error } = await sb.from('leads').update({ stage:newStage, updated_at: Date.now() }).eq('id', lead.id);
+  const rel = await apptReleaseFields(lead, newStage);
+  const { error } = await sb.from('leads').update({ stage:newStage, ...(rel||{}), updated_at: Date.now() }).eq('id', lead.id);
   if(error){ showToast("Couldn't move that lead"); render(); return; }
-  lead.stage = newStage; lead.updatedAt = Date.now();
+  lead.stage = newStage; lead.updatedAt = Date.now(); applyRelease(lead, rel);
   render();
+  if(rel) showToast('Appointment time cleared');
 }
 function openAdd(){ state.adding = true; state.editingId = null; openModal(); }
 function openEdit(id){ state.adding = false; state.editingId = id; openModal(); }
@@ -1626,8 +1658,12 @@ async function saveLead(existing, opts={}){
   pendingWonDetails = null;
   try{
     if(existing){
+      const rel = await apptReleaseFields(existing, data.stage);
+      if(rel){ data.appt_date = ''; data.appt_start = ''; data.note_log = rel.note_log; }
       const { error } = await sb.from('leads').update(data).eq('id', existing.id);
       if(error) throw error;
+      applyRelease(existing, rel);
+      if(rel) showToast('Appointment time cleared');
       // patch the in-memory copy immediately rather than waiting on the realtime
       // round-trip, so a stage change (esp. into Won) can't appear to "revert"
       Object.assign(existing, {
