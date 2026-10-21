@@ -668,6 +668,18 @@ body{
 /* install / service channel switch */
 .chan-seg button{padding:7px 16px; font-size:13px;}
 .chan-seg button[data-ch=service].on{color:#B45309;}
+.chan-seg button[hidden]{display:none;}
+.mix-table{display:flex; flex-direction:column; border:1px solid var(--border); border-radius:10px; overflow:hidden;}
+.mix-row{display:grid; grid-template-columns:1.3fr repeat(6, 1fr); gap:8px; padding:11px 12px; border-top:1px solid var(--border); font-size:13px; font-variant-numeric:tabular-nums; align-items:center;}
+.mix-row:first-child{border-top:none;}
+.mix-row span:not(:first-child){text-align:right;}
+.mix-head{background:var(--surface-2); font-size:11.5px; font-weight:700; color:var(--text-muted);}
+.mix-total{font-weight:800; background:var(--surface-2);}
+#mixPanel .panel-head{flex-wrap:wrap;}
+@media (max-width:560px){
+  .mix-row{grid-template-columns:1.15fr repeat(4, 1fr); gap:6px; padding:10px; font-size:12.5px;}
+  .mix-row span:nth-child(2), .mix-row span:nth-child(7){display:none;}
+}
 .svc-box{border:1px solid var(--border); border-radius:var(--radius-m); padding:12px; display:flex; flex-direction:column; gap:12px; background:var(--surface-2);}
 .svc-box .sec-h{font-size:12px; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:#B45309;}
 .svc-files{display:flex; flex-direction:column; gap:6px;}
@@ -770,6 +782,7 @@ body{
     <div class="seg chan-seg" id="chanSeg">
       <button data-ch="install" class="on">Installs</button>
       <button data-ch="service">Service</button>
+      <button data-ch="all" id="chanAllBtn" hidden>Combined</button>
     </div>
   </div>
 
@@ -920,6 +933,20 @@ body{
       </div>
       <div class="stats-row" id="analyticsKpis"></div>
     </div>
+    <div class="panel" id="mixPanel" hidden>
+      <div class="panel-head">
+        <div>
+          <h2>Installs vs Service</h2>
+          <div class="panel-sub">Only deals marked won or lost count toward appointments and close rate</div>
+        </div>
+        <div class="seg" id="mixRangeSeg">
+          <button data-range="month" class="on">This month</button>
+          <button data-range="year">This year</button>
+          <button data-range="all">All time</button>
+        </div>
+      </div>
+      <div id="mixTable"></div>
+    </div>
     <div class="panel">
       <div class="panel-head">
         <div>
@@ -1011,8 +1038,12 @@ let brochures = [];
 let workOrders = [];
 let state = { view:'leads', search:'', editingId:null, adding:false, confirmingDeleteId:null, channel:'install' };
 try{ if(localStorage.getItem('np_channel')==='service') state.channel = 'service'; }catch(e){}
+// Analytics can also show installs + service together ("Combined"); the pipeline always shows one side.
+state.combined = false;
+try{ state.combined = localStorage.getItem('np_ana_combined')==='1'; }catch(e){}
+function anaCombined(){ return state.view==='analytics' && state.combined; }
 function leadChannel(l){ return l && l.channel==='service' ? 'service' : 'install'; }
-function chanLeads(arr){ return arr.filter(l=>leadChannel(l)===state.channel); }
+function chanLeads(arr){ return anaCombined() ? arr.slice() : arr.filter(l=>leadChannel(l)===state.channel); }
 function isService(){ return state.channel==='service'; }
 let pendingSvcFiles = [];   // files picked on a lead that isn't saved yet: [{name, file}]
 
@@ -1219,10 +1250,12 @@ function setView(v){
   state.view = v;
   const rep = isRepUser();
   const ch = isService() ? 'Service' : 'Install';
+  const ach = anaCombined() ? 'Combined' : ch;
   $('#pageTitle').textContent = {leads: ch+' pipeline', calendar: rep?'My schedule':'Calendar', documents:'Documents',
-    analytics: rep?'My performance · '+ch:ch+' analytics', profile:'Profile & communications'}[v] || '';
+    analytics: rep?'My performance · '+ach:ach+' analytics', profile:'Profile & communications'}[v] || '';
   $('#chanSeg').hidden = !(v==='leads' || v==='analytics');
-  $('#chanSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on', b.dataset.ch===state.channel));
+  $('#chanAllBtn').hidden = v!=='analytics';
+  $('#chanSeg').querySelectorAll('button').forEach(b=>b.classList.toggle('on', anaCombined() ? b.dataset.ch==='all' : b.dataset.ch===state.channel));
   $('#newLeadBtn').lastChild.textContent = isService() ? ' New service lead' : ' New lead';
   $('#pageDate').textContent = new Date().toLocaleDateString(undefined,{weekday:'long', month:'long', day:'numeric'});
   $('#tabLeads').classList.toggle('active', v==='leads');
@@ -1247,7 +1280,9 @@ $('#tabDocs').addEventListener('click', ()=>setView('documents'));
 $('#tabCal').addEventListener('click', ()=>setView('calendar'));
 $('#tabAnalytics').addEventListener('click', ()=>setView('analytics'));
 function setChannel(ch){
-  state.channel = ch==='service' ? 'service' : 'install';
+  state.combined = ch==='all';
+  try{ localStorage.setItem('np_ana_combined', state.combined ? '1' : '0'); }catch(e){}
+  if(ch!=='all') state.channel = ch==='service' ? 'service' : 'install';
   try{ localStorage.setItem('np_channel', state.channel); }catch(e){}
   setView(state.view); render();
 }
@@ -1308,6 +1343,7 @@ function renderAnalytics(){
   if(!currentUser) return;
   if(currentUser.role==='rep'){ renderRepAnalytics(); return; }
   renderSourceTable();
+  renderMix();
   const cl = chanLeads(leads);
   const roster = Array.from(new Set([...REP_SUGGESTIONS, ...cl.map(l=>l.assignedRep).filter(Boolean)]));
   const allRows = roster.map(rep=>{
@@ -3386,6 +3422,37 @@ $('#srcRangeSeg').addEventListener('click', e=>{
   renderSourceTable();
 });
 
+/* ================= COMBINED: INSTALLS VS SERVICE ================= */
+let mixRange = 'month';
+function renderMix(){
+  const panel = $('#mixPanel'); if(!panel) return;
+  panel.hidden = !anaCombined();
+  if(panel.hidden) return;
+  const box = $('#mixTable'); box.innerHTML = '';
+  const inR = l=> inRange(new Date(decidedDay(l)+'T12:00:00').getTime(), mixRange);
+  const leadsIn = l=> inRange(l.createdAt, mixRange);
+  const calc = list=>{
+    const ran = list.filter(l=>isDecided(l) && inR(l));
+    const won = ran.filter(l=>l.stage==='won');
+    const rev = won.reduce((s,l)=>s+(Number(l.salePrice)||0),0);
+    return { leads:list.filter(leadsIn).length, ran:ran.length, won:won.length, lost:ran.length-won.length, rev,
+      close: ran.length ? Math.round(won.length/ran.length*100)+'%' : '—', avg: won.length ? fmtMoney(rev/won.length) : '—' };
+  };
+  const rows = [['Installs', calc(leads.filter(l=>leadChannel(l)==='install'))], ['Service', calc(leads.filter(l=>leadChannel(l)==='service'))], ['Combined', calc(leads)]];
+  const tbl = el('div',{class:'mix-table'},
+    el('div',{class:'mix-row mix-head'}, ...['','New leads','Won','Lost','Close rate','Revenue','Avg sale'].map(t=>el('span',{}, t))));
+  rows.forEach(([name, r], i)=> tbl.append(el('div',{class:'mix-row'+(i===2?' mix-total':'')},
+    el('span',{style:'font-weight:700'}, name), el('span',{}, String(r.leads)), el('span',{}, String(r.won)), el('span',{}, String(r.lost)),
+    el('span',{}, r.close), el('span',{}, fmtMoney(r.rev)), el('span',{}, r.avg))));
+  box.append(el('div',{class:'mix-scroll'}, tbl));
+}
+$('#mixRangeSeg').addEventListener('click', e=>{
+  const b = e.target.closest('button[data-range]'); if(!b) return;
+  mixRange = b.dataset.range;
+  $('#mixRangeSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on', x===b));
+  renderMix();
+});
+
 /* ================= REP DRILL-DOWN: APPOINTMENTS RUN ================= */
 function openRepAppts(rep){
   const overlay = $('#overlay'), modal = $('#modal');
@@ -3428,7 +3495,7 @@ function openRepAppts(rep){
     notes.forEach(n=>list.append(el('div',{class:'attrib', style:'margin:8px 12px;'}, n)));
   }
   modal.append(el('div',{class:'modal'},
-    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, rep), el('div',{class:'sheet-sub'}, 'Appointments run · '+(isService()?'Service':'Installs'))),
+    el('div',{class:'modal-head'}, el('div',{}, el('h2',{}, rep), el('div',{class:'sheet-sub'}, 'Appointments run · '+(anaCombined()?'Installs + Service':isService()?'Service':'Installs'))),
       el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})),
     seg, summary, list));
   overlay.hidden = false;
@@ -3437,7 +3504,7 @@ function openRepAppts(rep){
   sb.from('leads').select('*').eq('assigned_rep', rep).neq('appt_date','').order('appt_date',{ascending:false}).order('appt_start',{ascending:false}).limit(3000)
     .then(({data, error})=>{
       if(error){ console.error(error); failed = true; }
-      else rows = data.map(mapLead).filter(l=>leadChannel(l)===state.channel && /^\d{4}-\d{2}-\d{2}$/.test(l.apptDate||''));
+      else rows = chanLeads(data.map(mapLead)).filter(l=>/^\d{4}-\d{2}-\d{2}$/.test(l.apptDate||''));
       paint();
     });
 }
@@ -3677,7 +3744,7 @@ function openExportMenu(){
   periodSel.addEventListener('change', ()=>{ customRow.hidden = periodSel.value!=='custom'; });
   const chanSel = el('select',{id:'ex-chan'});
   [['install','Installs'],['service','Service'],['both','Installs + Service']].forEach(([v,t])=>chanSel.append(el('option',{value:v}, t)));
-  chanSel.value = state.channel;
+  chanSel.value = anaCombined() ? 'both' : state.channel;
   const msg = el('div',{class:'attrib'});
   const go = el('button',{class:'btn btn-primary'}, 'Download Excel');
   go.addEventListener('click', async ()=>{
