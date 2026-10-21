@@ -105,12 +105,16 @@ button{font-family:inherit;}
 .badge-ok{background:var(--success); color:#fff;}
 .badge-unconf{background:var(--surface-2); color:var(--text-muted); border:1px dashed var(--border);}
 .gc-ok{color:var(--success);}
-.confirm-wrap{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.confirm-wrap{display:flex; flex-direction:column; gap:6px;}
+.confirm-btns{display:grid; grid-template-columns:1fr 1fr; gap:8px;}
+.badge-texted{background:var(--warning-soft); color:var(--warning);}
+.gc-texted{color:var(--warning);}
+.confirm-btn.texted.on{background:var(--warning); border-color:var(--warning);}
 .confirm-btn{display:inline-flex; align-items:center; justify-content:center; gap:8px; height:44px; padding:0 16px; border-radius:10px; border:1.5px dashed var(--border); background:var(--surface); color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer;}
 .confirm-btn:hover{border-color:var(--success); color:var(--success);}
 .confirm-btn.on{background:var(--success); border:1.5px solid var(--success); color:#fff;}
 .confirm-meta{font-size:12px; color:var(--text-muted); font-weight:600;}
-@media (max-width:640px){ .confirm-btn{flex:1; height:48px; font-size:15px;} .confirm-wrap{flex-direction:column; align-items:stretch; gap:4px;} .confirm-meta{text-align:center;} }
+@media (max-width:640px){ .confirm-btn{height:48px; font-size:14px; padding:0 8px;} .confirm-meta{text-align:center;} }
 .card select{
   margin-top:2px; width:100%; font-size:12px; font-family:inherit; font-weight:600;
   border:1px solid var(--border); border-radius:7px; padding:6px 7px; background:var(--surface); color:var(--text);
@@ -1239,7 +1243,7 @@ function mapLead(r){
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
     createdAt:toMs(r.created_at), updatedAt:toMs(r.updated_at),
-    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', waterTest:r.water_test||null, reportToken:r.report_token||'', apptConfirmedAt:r.appt_confirmed_at||null, apptConfirmedBy:r.appt_confirmed_by||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
+    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', waterTest:r.water_test||null, reportToken:r.report_token||'', apptConfirmedAt:r.appt_confirmed_at||null, apptConfirmedBy:r.appt_confirmed_by||'', apptTextedAt:r.appt_texted_at||null, apptTextedBy:r.appt_texted_by||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
   };
 }
 async function fetchLeads(){
@@ -1501,7 +1505,7 @@ function renderCard(lead){
   if(lead.assignedRep) meta.append(el('span',{class:'badge badge-rep'}, repAvatar(lead.assignedRep), lead.assignedRep.split(' ')[0]));
   if(lead.apptDate && lead.apptStart){
     meta.append(el('span',{class:'badge badge-appt'}, fmtApptShort(lead.apptDate, lead.apptStart)));
-    if(lead.stage==='scheduled') meta.append(isApptConfirmed(lead) ? el('span',{class:'badge badge-ok'}, '✓ Confirmed') : el('span',{class:'badge badge-unconf'}, 'Not confirmed'));
+    if(lead.stage==='scheduled') meta.append(confirmBadge(lead));
   } else if(lead.requestedWindow){
     meta.append(el('span',{class:'badge badge-time'}, lead.requestedWindow));
   }
@@ -1556,7 +1560,7 @@ async function apptReleaseFields(lead, newStage){
     by:currentUser.id, byName:currentUser.name, at:Date.now() };
   return { appt_date:'', appt_start:'', ...unconfirmFields(lead), note_log:[...(Array.isArray(lead.noteLog)?lead.noteLog:[]), entry] };
 }
-function applyRelease(lead, rel){ if(rel){ lead.apptDate = ''; lead.apptStart = ''; lead.apptConfirmedAt = null; lead.noteLog = rel.note_log; } }
+function applyRelease(lead, rel){ if(rel){ lead.apptDate = ''; lead.apptStart = ''; clearConfirmState(lead); lead.noteLog = rel.note_log; } }
 // one-time tidy-up for leads already sitting in New/Awaiting with an old appointment on them
 let apptCleanupDone = false;
 async function cleanupStaleAppts(){
@@ -2451,32 +2455,57 @@ function renderCompare(container, date, rows, onBook){
   container.append(list);
 }
 
-/* ---- customer confirmed the appointment ---- */
-// clears the confirmation whenever the time changes or the appointment is removed
-// (only sent when one was set, so nothing breaks before the database column exists)
-function unconfirmFields(lead){ return lead && lead.apptConfirmedAt ? { appt_confirmed_at:null, appt_confirmed_by:'' } : {}; }
+/* ---- appointment confirmation: Texted to confirm → Confirmed ---- */
+// both clear whenever the time changes or the appointment is removed
+// (only sent when set, so nothing breaks before the database columns exist)
+function unconfirmFields(lead){
+  if(!lead) return {};
+  return { ...(lead.apptConfirmedAt ? { appt_confirmed_at:null, appt_confirmed_by:'' } : {}),
+           ...(lead.apptTextedAt ? { appt_texted_at:null, appt_texted_by:'' } : {}) };
+}
+function clearConfirmState(lead){ lead.apptConfirmedAt = null; lead.apptTextedAt = null; }
 function isApptConfirmed(lead){ return !!(lead && lead.apptConfirmedAt && lead.apptDate); }
-async function setApptConfirmed(lead, on){
-  const upd = on ? { appt_confirmed_at:Date.now(), appt_confirmed_by:currentUser.name||'' } : { appt_confirmed_at:null, appt_confirmed_by:'' };
+function isApptTexted(lead){ return !!(lead && lead.apptTextedAt && lead.apptDate); }
+const CONFIRM_KINDS = {
+  texted:    { col:'appt_texted',    key:'apptTexted',    on:'Texted to confirm', off:'Texted to confirm', toastOn:'Marked texted', toastOff:'Unmarked texted' },
+  confirmed: { col:'appt_confirmed', key:'apptConfirmed', on:'Confirmed',         off:'Confirm appointment', toastOn:'Appointment confirmed', toastOff:'Marked not confirmed' },
+};
+async function setConfirmFlag(lead, kind, on){
+  const k = CONFIRM_KINDS[kind];
+  const upd = on ? { [k.col+'_at']:Date.now(), [k.col+'_by']:currentUser.name||'' } : { [k.col+'_at']:null, [k.col+'_by']:'' };
   const { error } = await sb.from('leads').update({ ...upd, updated_at:Date.now() }).eq('id', lead.id);
   if(error){ console.error(error); showToast(/column|schema/i.test(error.message||'') ? 'One-time setup needed in Supabase (confirm SQL)' : "Couldn't save — check your connection"); return false; }
-  lead.apptConfirmedAt = upd.appt_confirmed_at; lead.apptConfirmedBy = upd.appt_confirmed_by; lead.updatedAt = Date.now();
-  showToast(on ? 'Appointment confirmed' : 'Marked not confirmed');
+  lead[k.key+'At'] = upd[k.col+'_at']; lead[k.key+'By'] = upd[k.col+'_by']; lead.updatedAt = Date.now();
+  showToast(on ? k.toastOn : k.toastOff);
   renderStats(); renderBoard(); if(state.view==='calendar') gcRender();
   return true;
 }
+const CHECK_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>';
+const TEXT_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
+const CIRCLE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="9"/></svg>';
+function fmtWhen(ts){ const d = new Date(ts); return d.toLocaleDateString('en-US',{month:'short', day:'numeric'})+' '+d.toLocaleTimeString('en-US',{hour:'numeric', minute:'2-digit'}); }
 function confirmToggle(lead, onDone){
-  const on = isApptConfirmed(lead);
-  const when = on && lead.apptConfirmedAt ? new Date(lead.apptConfirmedAt).toLocaleDateString('en-US',{month:'short', day:'numeric'})+' '+new Date(lead.apptConfirmedAt).toLocaleTimeString('en-US',{hour:'numeric', minute:'2-digit'}) : '';
-  const btn = el('button',{type:'button', class:'confirm-btn'+(on?' on':''),
-    html: on ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span>Confirmed</span>'
-             : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg><span>Confirm appointment</span>'});
-  btn.title = on ? 'Confirmed by '+(lead.apptConfirmedBy||'someone')+' · '+when+' — tap to undo' : 'Tap once the customer confirms';
-  btn.addEventListener('click', async ()=>{ btn.disabled = true; if(await setApptConfirmed(lead, !on)) onDone(); else btn.disabled = false; });
-  const wrap = el('div',{class:'confirm-wrap'}, btn);
-  if(on) wrap.append(el('span',{class:'confirm-meta'}, 'by '+(lead.apptConfirmedBy||'—').split(' ')[0]+' · '+when));
+  const btn = kind=>{
+    const k = CONFIRM_KINDS[kind], on = !!(lead[k.key+'At'] && lead.apptDate);
+    const icon = on ? CHECK_SVG : (kind==='texted' ? TEXT_SVG : CIRCLE_SVG);
+    const b = el('button',{type:'button', class:'confirm-btn '+kind+(on?' on':''), html: icon+'<span>'+(on?k.on:k.off)+'</span>'});
+    b.title = on ? (k.on+' by '+(lead[k.key+'By']||'someone')+' · '+fmtWhen(lead[k.key+'At'])+' — tap to undo') : (kind==='texted' ? 'Tap after you text the customer' : 'Tap once the customer confirms');
+    b.addEventListener('click', async ()=>{ b.disabled = true; if(await setConfirmFlag(lead, kind, !on)) onDone(); else b.disabled = false; });
+    return b;
+  };
+  const wrap = el('div',{class:'confirm-wrap'}, el('div',{class:'confirm-btns'}, btn('texted'), btn('confirmed')));
+  const metas = [];
+  if(isApptTexted(lead)) metas.push('Texted by '+(lead.apptTextedBy||'—').split(' ')[0]+' · '+fmtWhen(lead.apptTextedAt));
+  if(isApptConfirmed(lead)) metas.push('Confirmed by '+(lead.apptConfirmedBy||'—').split(' ')[0]+' · '+fmtWhen(lead.apptConfirmedAt));
+  if(metas.length) wrap.append(el('span',{class:'confirm-meta'}, metas.join('  ·  ')));
   return wrap;
 }
+function confirmBadge(lead){
+  if(isApptConfirmed(lead)) return el('span',{class:'badge badge-ok'}, '✓ Confirmed');
+  if(isApptTexted(lead)) return el('span',{class:'badge badge-texted'}, 'Texted to confirm');
+  return el('span',{class:'badge badge-unconf'}, 'Not confirmed');
+}
+function confirmLabel(lead){ return isApptConfirmed(lead) ? '✓ Confirmed' : isApptTexted(lead) ? 'Texted to confirm' : 'Not confirmed'; }
 function buildSchedBox(lead){
   const box = el('div',{class:'sched-box'}, el('div',{class:'lbl', style:'font-size:12px;font-weight:700;color:var(--text-muted);'}, 'Appointment'));
   if(lead.apptDate && lead.apptStart){
@@ -2579,7 +2608,7 @@ async function bookAppointment(lead, rep, date, slot, addr){
     if(lead.stage==='new' || lead.stage==='awaiting') upd.stage = 'scheduled';
     const { error: e2 } = await sb.from('leads').update(upd).eq('id', lead.id);
     if(e2) throw e2;
-    lead.assignedRep = rep; lead.apptDate = date; lead.apptStart = slot; lead.updatedAt = upd.updated_at; lead.apptConfirmedAt = null;
+    lead.assignedRep = rep; lead.apptDate = date; lead.apptStart = slot; lead.updatedAt = upd.updated_at; clearConfirmState(lead);
     if(upd.stage) lead.stage = upd.stage;
     showToast('Appointment booked');
     render(); openModal();
@@ -2592,7 +2621,7 @@ async function clearAppointment(lead){
     }
     const { error } = await sb.from('leads').update({ appt_date:'', appt_start:'', updated_at:Date.now(), ...unconfirmFields(lead) }).eq('id', lead.id);
     if(error) throw error;
-    lead.apptDate = ''; lead.apptStart = ''; lead.updatedAt = Date.now(); lead.apptConfirmedAt = null;
+    lead.apptDate = ''; lead.apptStart = ''; lead.updatedAt = Date.now(); clearConfirmState(lead);
     render(); openModal();
   }catch(err){ showToast("Couldn't change that appointment"); }
 }
@@ -3196,7 +3225,7 @@ function gcTimeGrid(){
           title:`${name} · ${slotLabel(l.apptStart)} · ${ev.rep}`, onclick:()=>gcOpenAppt(l)},
           height<38
             ? el('div',{class:'t'}, isApptConfirmed(l)?'✓ ':'', name+', ', el('span',{style:'font-weight:500'}, slotLabel(l.apptStart)))
-            : el('div',{class:'t'}, isApptConfirmed(l)?el('span',{class:'gc-ok'}, '✓ '):'', name),
+            : el('div',{class:'t'}, isApptConfirmed(l)?el('span',{class:'gc-ok'}, '✓ '):isApptTexted(l)?el('span',{class:'gc-texted'}, '… '):'', name),
           height<38 ? null : el('div',{class:'s'}, slotLabel(l.apptStart)+(city?' · '+city:'')),
           (!isRepUser() && height>44) ? el('div',{class:'s'}, ev.rep) : null
         ));
@@ -3273,7 +3302,7 @@ function gcSchedule(){
         el('span',{class:'tm'}, slotLabel(l.apptStart)),
         propertyThumb(l.address),
         el('span',{style:'min-width:0'}, el('div',{class:'nm'}, l.name||'Customer'),
-          el('div',{class:'sub'}, [l.address, isRepUser()?'':l.assignedRep, stageLabel(l.stage), l.stage==='scheduled' ? (isApptConfirmed(l)?'✓ Confirmed':'Not confirmed') : ''].filter(Boolean).join(' · ')))
+          el('div',{class:'sub'}, [l.address, isRepUser()?'':l.assignedRep, stageLabel(l.stage), l.stage==='scheduled' ? confirmLabel(l) : ''].filter(Boolean).join(' · ')))
       ));
     });
     box.append(el('div',{class:'gc-srow'+(ds===today?' today':'')},

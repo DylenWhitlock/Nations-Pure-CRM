@@ -216,3 +216,7 @@ grant execute on function public.water_report(text) to anon, authenticated;
 -- Appointment confirmed by customer (run once)
 alter table leads add column if not exists appt_confirmed_at bigint;
 alter table leads add column if not exists appt_confirmed_by text not null default '';
+
+-- Texted the customer to confirm (run once)
+alter table leads add column if not exists appt_texted_at bigint;
+alter table leads add column if not exists appt_texted_by text not null default '';
