@@ -212,3 +212,7 @@ begin
 end $$;
 revoke all on function public.water_report(text) from public;
 grant execute on function public.water_report(text) to anon, authenticated;
+
+-- Appointment confirmed by customer (run once)
+alter table leads add column if not exists appt_confirmed_at bigint;
+alter table leads add column if not exists appt_confirmed_by text not null default '';

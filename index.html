@@ -102,6 +102,15 @@ button{font-family:inherit;}
 .badge-warn{background:var(--warning-soft); color:var(--warning);}
 .badge-time{background:var(--surface-2); color:var(--text-muted);}
 .badge-appt{background:var(--success-soft); color:var(--success);}
+.badge-ok{background:var(--success); color:#fff;}
+.badge-unconf{background:var(--surface-2); color:var(--text-muted); border:1px dashed var(--border);}
+.gc-ok{color:var(--success);}
+.confirm-wrap{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+.confirm-btn{display:inline-flex; align-items:center; justify-content:center; gap:8px; height:44px; padding:0 16px; border-radius:10px; border:1.5px dashed var(--border); background:var(--surface); color:var(--text); font:inherit; font-size:14px; font-weight:700; cursor:pointer;}
+.confirm-btn:hover{border-color:var(--success); color:var(--success);}
+.confirm-btn.on{background:var(--success); border:1.5px solid var(--success); color:#fff;}
+.confirm-meta{font-size:12px; color:var(--text-muted); font-weight:600;}
+@media (max-width:640px){ .confirm-btn{flex:1; height:48px; font-size:15px;} .confirm-wrap{flex-direction:column; align-items:stretch; gap:4px;} .confirm-meta{text-align:center;} }
 .card select{
   margin-top:2px; width:100%; font-size:12px; font-family:inherit; font-weight:600;
   border:1px solid var(--border); border-radius:7px; padding:6px 7px; background:var(--surface); color:var(--text);
@@ -1230,7 +1239,7 @@ function mapLead(r){
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
     noteLog: r.note_log||[], notes:r.notes, createdBy:r.created_by, createdByName:r.created_by_name,
     createdAt:toMs(r.created_at), updatedAt:toMs(r.updated_at),
-    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', waterTest:r.water_test||null, reportToken:r.report_token||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
+    channel: r.channel==='service' ? 'service' : 'install', techNotes:r.tech_notes||'', waterTest:r.water_test||null, reportToken:r.report_token||'', apptConfirmedAt:r.appt_confirmed_at||null, apptConfirmedBy:r.appt_confirmed_by||'', serviceFiles: Array.isArray(r.service_files) ? r.service_files : [],
   };
 }
 async function fetchLeads(){
@@ -1492,6 +1501,7 @@ function renderCard(lead){
   if(lead.assignedRep) meta.append(el('span',{class:'badge badge-rep'}, repAvatar(lead.assignedRep), lead.assignedRep.split(' ')[0]));
   if(lead.apptDate && lead.apptStart){
     meta.append(el('span',{class:'badge badge-appt'}, fmtApptShort(lead.apptDate, lead.apptStart)));
+    if(lead.stage==='scheduled') meta.append(isApptConfirmed(lead) ? el('span',{class:'badge badge-ok'}, '✓ Confirmed') : el('span',{class:'badge badge-unconf'}, 'Not confirmed'));
   } else if(lead.requestedWindow){
     meta.append(el('span',{class:'badge badge-time'}, lead.requestedWindow));
   }
@@ -1544,9 +1554,9 @@ async function apptReleaseFields(lead, newStage){
   const stageName = (STAGES.find(x=>x.id===newStage)||{}).label || newStage;
   const entry = { text:'Appointment cleared ('+was+(lead.assignedRep?' with '+lead.assignedRep:'')+') — moved to '+stageName,
     by:currentUser.id, byName:currentUser.name, at:Date.now() };
-  return { appt_date:'', appt_start:'', note_log:[...(Array.isArray(lead.noteLog)?lead.noteLog:[]), entry] };
+  return { appt_date:'', appt_start:'', ...unconfirmFields(lead), note_log:[...(Array.isArray(lead.noteLog)?lead.noteLog:[]), entry] };
 }
-function applyRelease(lead, rel){ if(rel){ lead.apptDate = ''; lead.apptStart = ''; lead.noteLog = rel.note_log; } }
+function applyRelease(lead, rel){ if(rel){ lead.apptDate = ''; lead.apptStart = ''; lead.apptConfirmedAt = null; lead.noteLog = rel.note_log; } }
 // one-time tidy-up for leads already sitting in New/Awaiting with an old appointment on them
 let apptCleanupDone = false;
 async function cleanupStaleAppts(){
@@ -1626,7 +1636,7 @@ function queueLeadSave(lead, cap){
   autosaveChain = autosaveChain.then(async ()=>{
     const d = cap.d;
     const rel = d.stage!==cap.prevStage ? await apptReleaseFields(lead, d.stage) : null;
-    if(rel){ d.appt_date = ''; d.appt_start = ''; d.note_log = rel.note_log; }
+    if(rel) Object.assign(d, rel);
     const { error } = await sb.from('leads').update(d).eq('id', lead.id);
     lastAutosaveAt = Date.now();
     if(error){ console.error(error); setSaveStatus('Not saved — check your connection', 'err'); showToast("Couldn't save — check your connection"); return; }
@@ -1881,7 +1891,7 @@ async function saveLead(existing, opts={}){
   try{
     if(existing){
       const rel = await apptReleaseFields(existing, data.stage);
-      if(rel){ data.appt_date = ''; data.appt_start = ''; data.note_log = rel.note_log; }
+      if(rel) Object.assign(data, rel);
       const { error } = await sb.from('leads').update(data).eq('id', existing.id);
       if(error) throw error;
       applyRelease(existing, rel);
@@ -2441,6 +2451,32 @@ function renderCompare(container, date, rows, onBook){
   container.append(list);
 }
 
+/* ---- customer confirmed the appointment ---- */
+// clears the confirmation whenever the time changes or the appointment is removed
+// (only sent when one was set, so nothing breaks before the database column exists)
+function unconfirmFields(lead){ return lead && lead.apptConfirmedAt ? { appt_confirmed_at:null, appt_confirmed_by:'' } : {}; }
+function isApptConfirmed(lead){ return !!(lead && lead.apptConfirmedAt && lead.apptDate); }
+async function setApptConfirmed(lead, on){
+  const upd = on ? { appt_confirmed_at:Date.now(), appt_confirmed_by:currentUser.name||'' } : { appt_confirmed_at:null, appt_confirmed_by:'' };
+  const { error } = await sb.from('leads').update({ ...upd, updated_at:Date.now() }).eq('id', lead.id);
+  if(error){ console.error(error); showToast(/column|schema/i.test(error.message||'') ? 'One-time setup needed in Supabase (confirm SQL)' : "Couldn't save — check your connection"); return false; }
+  lead.apptConfirmedAt = upd.appt_confirmed_at; lead.apptConfirmedBy = upd.appt_confirmed_by; lead.updatedAt = Date.now();
+  showToast(on ? 'Appointment confirmed' : 'Marked not confirmed');
+  renderStats(); renderBoard(); if(state.view==='calendar') gcRender();
+  return true;
+}
+function confirmToggle(lead, onDone){
+  const on = isApptConfirmed(lead);
+  const when = on && lead.apptConfirmedAt ? new Date(lead.apptConfirmedAt).toLocaleDateString('en-US',{month:'short', day:'numeric'})+' '+new Date(lead.apptConfirmedAt).toLocaleTimeString('en-US',{hour:'numeric', minute:'2-digit'}) : '';
+  const btn = el('button',{type:'button', class:'confirm-btn'+(on?' on':''),
+    html: on ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg><span>Confirmed</span>'
+             : '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/></svg><span>Confirm appointment</span>'});
+  btn.title = on ? 'Confirmed by '+(lead.apptConfirmedBy||'someone')+' · '+when+' — tap to undo' : 'Tap once the customer confirms';
+  btn.addEventListener('click', async ()=>{ btn.disabled = true; if(await setApptConfirmed(lead, !on)) onDone(); else btn.disabled = false; });
+  const wrap = el('div',{class:'confirm-wrap'}, btn);
+  if(on) wrap.append(el('span',{class:'confirm-meta'}, 'by '+(lead.apptConfirmedBy||'—').split(' ')[0]+' · '+when));
+  return wrap;
+}
 function buildSchedBox(lead){
   const box = el('div',{class:'sched-box'}, el('div',{class:'lbl', style:'font-size:12px;font-weight:700;color:var(--text-muted);'}, 'Appointment'));
   if(lead.apptDate && lead.apptStart){
@@ -2448,7 +2484,7 @@ function buildSchedBox(lead){
       el('span',{}, (lead.assignedRep||'Unassigned')+' — '+fmtApptShort(lead.apptDate, lead.apptStart)),
       el('button',{class:'btn', onclick:()=>clearAppointment(lead)}, 'Change')
     );
-    box.append(row);
+    box.append(row, confirmToggle(lead, ()=>openModal()));
     return box;
   }
   const repI = el('input',{type:'text', id:'sch-rep', list:'repList', placeholder:'Water specialist'});
@@ -2538,12 +2574,12 @@ async function bookAppointment(lead, rep, date, slot, addr){
       lead_id:lead.id, customer_name:lead.name||'', created_by:currentUser.id, created_at:Date.now(),
     });
     if(e1) throw e1;
-    const upd = { assigned_rep:rep, appt_date:date, appt_start:slot, updated_at:Date.now() };
+    const upd = { assigned_rep:rep, appt_date:date, appt_start:slot, updated_at:Date.now(), ...unconfirmFields(lead) };
     if(addr !== (lead.address||'').trim()){ upd.address = addr; lead.address = addr; }
     if(lead.stage==='new' || lead.stage==='awaiting') upd.stage = 'scheduled';
     const { error: e2 } = await sb.from('leads').update(upd).eq('id', lead.id);
     if(e2) throw e2;
-    lead.assignedRep = rep; lead.apptDate = date; lead.apptStart = slot; lead.updatedAt = upd.updated_at;
+    lead.assignedRep = rep; lead.apptDate = date; lead.apptStart = slot; lead.updatedAt = upd.updated_at; lead.apptConfirmedAt = null;
     if(upd.stage) lead.stage = upd.stage;
     showToast('Appointment booked');
     render(); openModal();
@@ -2554,9 +2590,9 @@ async function clearAppointment(lead){
     if(lead.apptDate && lead.apptStart && lead.assignedRep){
       await sb.from('blocks').delete().eq('id', blockDocId(lead.assignedRep, lead.apptDate, lead.apptStart));
     }
-    const { error } = await sb.from('leads').update({ appt_date:'', appt_start:'', updated_at:Date.now() }).eq('id', lead.id);
+    const { error } = await sb.from('leads').update({ appt_date:'', appt_start:'', updated_at:Date.now(), ...unconfirmFields(lead) }).eq('id', lead.id);
     if(error) throw error;
-    lead.apptDate = ''; lead.apptStart = ''; lead.updatedAt = Date.now();
+    lead.apptDate = ''; lead.apptStart = ''; lead.updatedAt = Date.now(); lead.apptConfirmedAt = null;
     render(); openModal();
   }catch(err){ showToast("Couldn't change that appointment"); }
 }
@@ -3159,8 +3195,8 @@ function gcTimeGrid(){
         col.append(el('button',{class:'gc-ev '+(l.stage||''), style:pos+`background:${hexA(c,.16)};border-color:${hexA(c,.35)};border-left-color:${c};`,
           title:`${name} · ${slotLabel(l.apptStart)} · ${ev.rep}`, onclick:()=>gcOpenAppt(l)},
           height<38
-            ? el('div',{class:'t'}, name+', ', el('span',{style:'font-weight:500'}, slotLabel(l.apptStart)))
-            : el('div',{class:'t'}, name),
+            ? el('div',{class:'t'}, isApptConfirmed(l)?'✓ ':'', name+', ', el('span',{style:'font-weight:500'}, slotLabel(l.apptStart)))
+            : el('div',{class:'t'}, isApptConfirmed(l)?el('span',{class:'gc-ok'}, '✓ '):'', name),
           height<38 ? null : el('div',{class:'s'}, slotLabel(l.apptStart)+(city?' · '+city:'')),
           (!isRepUser() && height>44) ? el('div',{class:'s'}, ev.rep) : null
         ));
@@ -3237,7 +3273,7 @@ function gcSchedule(){
         el('span',{class:'tm'}, slotLabel(l.apptStart)),
         propertyThumb(l.address),
         el('span',{style:'min-width:0'}, el('div',{class:'nm'}, l.name||'Customer'),
-          el('div',{class:'sub'}, [l.address, isRepUser()?'':l.assignedRep, stageLabel(l.stage)].filter(Boolean).join(' · ')))
+          el('div',{class:'sub'}, [l.address, isRepUser()?'':l.assignedRep, stageLabel(l.stage), l.stage==='scheduled' ? (isApptConfirmed(l)?'✓ Confirmed':'Not confirmed') : ''].filter(Boolean).join(' · ')))
       ));
     });
     box.append(el('div',{class:'gc-srow'+(ds===today?' today':'')},
@@ -3516,6 +3552,7 @@ function openApptSheet(id){
     ),
     el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeModal, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})
   ));
+  if(lead.apptDate && !['won','lost'].includes(lead.stage)) form.append(confirmToggle(lead, ()=>openApptSheet(lead.id)));
 
   const propCard = buildPropertyCard(lead); if(propCard) form.append(propCard);
 
