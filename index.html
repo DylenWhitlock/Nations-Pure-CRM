@@ -101,6 +101,8 @@ button{font-family:inherit;}
 .badge-rep{background:var(--accent-soft); color:var(--accent-strong);}
 .badge-warn{background:var(--warning-soft); color:var(--warning);}
 .badge-time{background:var(--surface-2); color:var(--text-muted);}
+.badge-quote{background:var(--accent-soft); color:var(--accent-strong);}
+.badge-quote.soon{background:var(--danger-soft); color:var(--danger);}
 .badge-appt{background:var(--success-soft); color:var(--success);}
 .badge-ok{background:var(--success); color:#fff;}
 .badge-unconf{background:var(--surface-2); color:var(--text-muted); border:1px dashed var(--border);}
@@ -640,6 +642,7 @@ body{
 .col{--stage:var(--accent); --stage-soft:var(--accent-soft); background:var(--surface-3); border:1px solid var(--border); border-radius:var(--radius-m); padding:8px; gap:8px; position:relative;}
 .col[data-stage=scheduled]{--stage:var(--indigo); --stage-soft:var(--indigo-soft);}
 .col[data-stage=awaiting]{--stage:var(--warning); --stage-soft:var(--warning-soft);}
+.col[data-stage=quoted]{--stage:var(--accent); --stage-soft:var(--accent-soft);}
 .col[data-stage=won]{--stage:var(--success); --stage-soft:var(--success-soft);}
 .col[data-stage=lost]{--stage:var(--danger); --stage-soft:var(--danger-soft);}
 .col-head{padding:6px 6px 4px;}
@@ -1071,6 +1074,7 @@ const STAGES = [
   {id:'new', label:'New Lead', dot:''},
   {id:'awaiting', label:'Awaiting Response', dot:''},
   {id:'scheduled', label:'In-Home Scheduled', dot:''},
+  {id:'quoted', label:'Quoted', dot:''},
   {id:'won', label:'Won', dot:'success'},
   {id:'lost', label:'Lost', dot:'danger'},
 ];
@@ -1237,7 +1241,7 @@ $('#signOutBtn').addEventListener('click', ()=> sb.auth.signOut());
 /* ================= DATA MAPPING ================= */
 function mapLead(r){
   return {
-    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, leadSource:r.lead_source||'', need:r.need, stage:(r.stage==='quoted' ? 'lost' : r.stage),
+    id:r.id, name:r.name, phone:r.phone, email:r.email, address:r.address, county:r.county, csr:r.csr, leadSource:r.lead_source||'', need:r.need, stage:r.stage,
     salePrice:r.sale_price, systemName:r.system_name,
     requestedWindow:r.requested_window, offHours:r.off_hours, repConfirmed:r.rep_confirmed,
     assignedRep:r.assigned_rep, reviewed:r.reviewed, apptDate:r.appt_date, apptStart:r.appt_start,
@@ -1257,6 +1261,7 @@ async function fetchLeads(){
   }
   leads = all.map(mapLead);
   render();
+  sweepExpiredQuotes();
   if(state.editingId && !state.apptId && !modalBusy()) openModal();
   cleanupStaleAppts();
 }
@@ -1510,6 +1515,10 @@ function renderCard(lead){
     meta.append(el('span',{class:'badge badge-time'}, lead.requestedWindow));
   }
   if(unconfirmed) meta.append(el('span',{class:'badge badge-warn'}, 'Needs rep confirm'));
+  if(lead.stage==='quoted'){
+    const d = quoteDaysLeft(lead);
+    meta.append(el('span',{class:'badge badge-quote'+(d<=2?' soon':'')}, d<=0 ? 'Moving to Lost' : 'Lost in '+d+(d===1?' day':' days')));
+  }
   card.append(meta);
   if(lead.stage==='new'){
     const cb = el('input',{type:'checkbox', onchange:e=>{ e.stopPropagation(); toggleReviewed(lead, e.target.checked); }});
@@ -1574,6 +1583,42 @@ async function cleanupStaleAppts(){
   }
   if(stale.length) render();
 }
+/* ---- Quoted: a quote with no decision after 7 days moves to Lost on its own ---- */
+const QUOTE_DAYS = 7, DAY_MS = 864e5;
+function quotedAt(l){
+  const log = Array.isArray(l.noteLog) ? l.noteLog : [];
+  for(let i=log.length-1; i>=0; i--){ if(log[i] && log[i].kind==='quoted') return Number(log[i].at)||0; }
+  return l.updatedAt || l.createdAt || Date.now();
+}
+function quoteDaysLeft(l){ return Math.ceil((quotedAt(l) + QUOTE_DAYS*DAY_MS - Date.now()) / DAY_MS); }
+// note stamped when a lead enters Quoted — it's what the 7-day clock runs from
+function quotedFields(lead, prevStage, newStage, baseLog){
+  if(newStage!=='quoted' || prevStage==='quoted') return null;
+  const log = Array.isArray(baseLog) ? baseLog : (Array.isArray(lead.noteLog) ? lead.noteLog : []);
+  return { note_log:[...log, { text:'Moved to Quoted — goes to Lost in '+QUOTE_DAYS+' days if not won', kind:'quoted',
+    by:currentUser?.id||null, byName:currentUser?.name||'', at:Date.now() }] };
+}
+let quoteSweepBusy = false;
+async function sweepExpiredQuotes(){
+  if(quoteSweepBusy || !currentUser) return;
+  const due = leads.filter(l=>l.stage==='quoted' && Date.now() - quotedAt(l) >= QUOTE_DAYS*DAY_MS);
+  if(!due.length) return;
+  quoteSweepBusy = true;
+  let moved = 0;
+  try{
+    for(const l of due){
+      const entry = { text:'Auto-moved to Lost — quoted '+QUOTE_DAYS+'+ days with no decision', by:null, byName:'CRM', at:Date.now() };
+      const note_log = [...(Array.isArray(l.noteLog)?l.noteLog:[]), entry];
+      // only flips it if it's still Quoted, so two people open at once can't double it up
+      const { data, error } = await sb.from('leads').update({ stage:'lost', note_log, updated_at:Date.now() }).eq('id', l.id).eq('stage','quoted').select('id');
+      if(error){ console.error(error); continue; }
+      if(data && data.length){ l.stage = 'lost'; l.noteLog = note_log; l.updatedAt = Date.now(); moved++; }
+    }
+  } finally { quoteSweepBusy = false; }
+  if(moved){ render(); showToast(moved+' expired quote'+(moved===1?'':'s')+' moved to Lost'); }
+}
+setInterval(sweepExpiredQuotes, 60*60*1000);
+
 async function changeStage(lead, newStage, selectEl){
   if(newStage==='won'){
     const details = await askWonDetails({ salePrice: lead.salePrice, systemName: lead.systemName });
@@ -1586,9 +1631,10 @@ async function changeStage(lead, newStage, selectEl){
     return;
   }
   const rel = await apptReleaseFields(lead, newStage);
-  const { error } = await sb.from('leads').update({ stage:newStage, ...(rel||{}), updated_at: Date.now() }).eq('id', lead.id);
+  const qf = quotedFields(lead, lead.stage, newStage, rel && rel.note_log);
+  const { error } = await sb.from('leads').update({ stage:newStage, ...(rel||{}), ...(qf||{}), updated_at: Date.now() }).eq('id', lead.id);
   if(error){ showToast("Couldn't move that lead"); render(); return; }
-  lead.stage = newStage; lead.updatedAt = Date.now(); applyRelease(lead, rel);
+  lead.stage = newStage; lead.updatedAt = Date.now(); applyRelease(lead, rel); if(qf) lead.noteLog = qf.note_log;
   render();
   if(rel) showToast('Appointment time cleared');
 }
@@ -1641,9 +1687,12 @@ function queueLeadSave(lead, cap){
     const d = cap.d;
     const rel = d.stage!==cap.prevStage ? await apptReleaseFields(lead, d.stage) : null;
     if(rel) Object.assign(d, rel);
+    const qf = quotedFields(lead, cap.prevStage, d.stage, rel && rel.note_log);
+    if(qf) Object.assign(d, qf);
     const { error } = await sb.from('leads').update(d).eq('id', lead.id);
     lastAutosaveAt = Date.now();
     if(error){ console.error(error); setSaveStatus('Not saved — check your connection', 'err'); showToast("Couldn't save — check your connection"); return; }
+    if(qf) lead.noteLog = qf.note_log;
     if(rel){ applyRelease(lead, rel); showToast('Appointment time cleared'); if(state.editingId===lead.id && !state.apptId) openModal(); }
     if(d.stage==='won' && cap.prevStage!=='won') showToast('Marked Won');
     setSaveStatus('All changes saved', 'ok');
@@ -1896,9 +1945,11 @@ async function saveLead(existing, opts={}){
     if(existing){
       const rel = await apptReleaseFields(existing, data.stage);
       if(rel) Object.assign(data, rel);
+      const qf = quotedFields(existing, existing.stage, data.stage, rel && rel.note_log);
+      if(qf) Object.assign(data, qf);
       const { error } = await sb.from('leads').update(data).eq('id', existing.id);
       if(error) throw error;
-      applyRelease(existing, rel);
+      applyRelease(existing, rel); if(qf) existing.noteLog = qf.note_log;
       if(rel) showToast('Appointment time cleared');
       // patch the in-memory copy immediately rather than waiting on the realtime
       // round-trip, so a stage change (esp. into Won) can't appear to "revert"

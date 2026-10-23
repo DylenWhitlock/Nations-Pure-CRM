@@ -29,7 +29,7 @@ function pct(a, b) { return b ? Math.round(a / b * 100) + '%' : '—'; }
 
 function buildBrief(leads, blocks) {
   const today = ymdIn(Date.now()), yest = addDays(today, -1), month = today.slice(0, 7);
-  const L = leads.map(l => ({ ...l, stage: l.stage === 'quoted' ? 'lost' : l.stage, ch: l.channel === 'service' ? 'service' : 'install',
+  const L = leads.map(l => ({ ...l, stage: l.stage === 'quoted' && Date.now() - Number(l.updated_at || l.created_at) >= 7 * 864e5 ? 'lost' : l.stage, ch: l.channel === 'service' ? 'service' : 'install',
     created: ymdIn(Number(l.created_at)), updated: ymdIn(Number(l.updated_at || l.created_at)), price: Number(l.sale_price) || 0 }));
   const svc = l => (l.ch === 'service' ? ' (service)' : '');
   const out = [];
