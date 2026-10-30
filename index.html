@@ -1469,7 +1469,9 @@ function scrollToFirstUnconfirmed(){
 function renderBoard(){
   const board = $('#board'); board.innerHTML = '';
   const filtered = visibleLeads().filter(matchesSearch);
-  for(const stage of STAGES){
+  // Board column order: Awaiting Response sits at the far right
+  const boardStages = [...STAGES.filter(s=>s.id!=='awaiting'), ...STAGES.filter(s=>s.id==='awaiting')];
+  for(const stage of boardStages){
     let stageLeads = filtered.filter(l=>l.stage===stage.id);
     stageLeads.sort((a,b)=>{
       const au = isOffHoursUnconfirmed(a)?0:1, bu = isOffHoursUnconfirmed(b)?0:1;
