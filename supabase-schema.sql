@@ -220,3 +220,49 @@ alter table leads add column if not exists appt_confirmed_by text not null defau
 -- Texted the customer to confirm (run once)
 alter table leads add column if not exists appt_texted_at bigint;
 alter table leads add column if not exists appt_texted_by text not null default '';
+
+-- Customer quote page + online approval (run once in Supabase → SQL Editor)
+-- quote.html?q=<token> shows the quote; "Approve" marks the lead Won with the quoted system and price,
+-- which sends the normal deal-won text.
+create index if not exists leads_note_log_gin on leads using gin (note_log jsonb_path_ops);
+
+create or replace function public.quote_view(p_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare l leads; q jsonb;
+begin
+  if p_token is null or length(p_token) < 24 then return null; end if;
+  select * into l from leads
+    where note_log @> jsonb_build_array(jsonb_build_object('quote', jsonb_build_object('token', p_token))) limit 1;
+  if not found then return null; end if;
+  select e->'quote' into q from jsonb_array_elements(l.note_log) e where e->'quote'->>'token' = p_token limit 1;
+  return (q - 'path' - 'token') || jsonb_build_object('stage', l.stage);
+end $$;
+revoke all on function public.quote_view(text) from public;
+grant execute on function public.quote_view(text) to anon, authenticated;
+
+create or replace function public.quote_approve(p_token text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare l leads; idx int; q jsonb; sys text; now_ms bigint := (extract(epoch from clock_timestamp())*1000)::bigint;
+begin
+  if p_token is null or length(p_token) < 24 then return jsonb_build_object('ok', false); end if;
+  select * into l from leads
+    where note_log @> jsonb_build_array(jsonb_build_object('quote', jsonb_build_object('token', p_token))) limit 1 for update;
+  if not found then return jsonb_build_object('ok', false); end if;
+  select (t.ord - 1)::int, t.e->'quote' into idx, q
+    from jsonb_array_elements(l.note_log) with ordinality as t(e, ord) where t.e->'quote'->>'token' = p_token limit 1;
+  if q ? 'approvedAt' then return jsonb_build_object('ok', true, 'already', true); end if;
+  select string_agg(split_part(i->>'desc', E'\n', 1), ', ') into sys from jsonb_array_elements(q->'items') i;
+  update leads set
+    stage = 'won',
+    sale_price = (q->>'total')::numeric,
+    system_name = coalesce(sys, ''),
+    note_log = jsonb_set(note_log, array[idx::text, 'quote', 'approvedAt'], to_jsonb(now_ms))
+      || jsonb_build_array(jsonb_build_object(
+        'text', 'Customer approved quote #' || coalesce(q->>'number', '') || ' online — ' || coalesce(sys, '') || ' · $' || to_char((q->>'total')::numeric, 'FM999,999,990.00'),
+        'kind', 'quote_approved', 'byName', 'Customer', 'at', now_ms)),
+    updated_at = now_ms
+  where id = l.id;
+  return jsonb_build_object('ok', true);
+end $$;
+revoke all on function public.quote_approve(text) from public;
+grant execute on function public.quote_approve(text) to anon, authenticated;

@@ -2212,6 +2212,7 @@ function buildNotesSection(lead){
       a.addEventListener('click', ev=>{ if(a.getAttribute('href')==='#'){ ev.preventDefault(); showToast('Still loading — try again'); } });
       signedUrl(QUOTE_BUCKET, n.quote.path).then(u=>{ if(u) a.href = u; });
       item.append(el('div',{}, a));
+      if(n.quote.approvedAt) item.append(el('div',{style:'margin-top:4px;font-weight:800;color:var(--success)'}, 'Approved by customer · '+timeAgo(n.quote.approvedAt)));
     }
     log.append(item);
   }
@@ -3174,6 +3175,20 @@ $('#sigDoneBtn').addEventListener('click', ()=>{
 const QUOTE_BUCKET = 'work-orders';
 const NP_CO = { name:"Nation's Pure Water Systems", addr1:'108 Nu Energy Dr, Suite 2', addr2:'Aledo, TX 76008', phone:'888-763-0050', web:'nationspure.com' };
 let qd = null;
+const REP_EMAILS = { 'dylen whitlock':'dylen@nationspure.com' };
+async function quoteRepInfo(lead){
+  const name = (lead.assignedRep||'').trim() || currentUser.name;
+  const key = name.toLowerCase();
+  let email = REP_EMAILS[key] || (key===(currentUser.name||'').trim().toLowerCase() ? currentUser.email : '');
+  let phone = '';
+  try{
+    const { data } = await sb.from('rep_phones').select('rep_name,phone');
+    const hit = (data||[]).find(r=>(r.rep_name||'').trim().toLowerCase()===key);
+    if(hit) phone = hit.phone||'';
+  }catch(e){}
+  return { name, email, phone };
+}
+function quotePageUrl(token){ return location.origin+'/quote.html?q='+token; }
 function quoteMoney(n){ return '$'+(Number(n)||0).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
 function parseMoney(v){ const n = parseFloat(String(v||'').replace(/[^0-9.\-]/g,'')); return isNaN(n) ? 0 : n; }
 function openQuote(lead){
@@ -3284,7 +3299,7 @@ async function generateQuotePdf(q){
   y -= 15;
   const fmtPh = p=>{ const d = String(p||'').replace(/\D/g,'').replace(/^1(?=\d{10}$)/,''); return d.length===10 ? '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6) : p; };
   const custLines = [q.cust.name, q.cust.address, fmtPh(q.cust.phone), q.cust.email].filter(Boolean);
-  const repLines = [q.rep, q.repEmail].filter(Boolean);
+  const repLines = [q.rep, fmtPh(q.repPhone), q.repEmail].filter(Boolean);
   const top = y;
   custLines.forEach((t,i)=>{ wrapText(t, i?reg:bold, 10.5, 260).forEach(l=>{ txt(l, M, y, {font:i?reg:bold, size:10.5}); y -= 14; }); });
   let y2 = top; repLines.forEach((t,i)=>{ txt(t, 340, y2, {font:i?reg:bold, size:10.5}); y2 -= 14; });
@@ -3332,22 +3347,26 @@ async function finishQuote(){
   const lead = qd.lead;
   try{
     const at = Date.now();
+    const repI = await quoteRepInfo(lead);
     const q = { at, number: new Date(at).toISOString().slice(2,10).replace(/-/g,'')+'-'+String(at).slice(-4),
       cust:{ ...qd.cust }, items, total: items.reduce((a,i)=>a+i.price,0), note: qd.note.trim(),
-      rep: currentUser.name, repEmail: currentUser.email };
+      rep: repI.name, repEmail: repI.email, repPhone: repI.phone };
     const bytes = await generateQuotePdf(q);
     const blob = new Blob([bytes], {type:'application/pdf'});
     const fname = ((q.cust.name||'customer').trim().replace(/[^a-z0-9]+/gi,'-').replace(/^-+|-+$/g,'')||'customer')+'-quote-'+q.number+'.pdf';
-    let path = null;
+    let path = null, pdfUrl = null;
     try{ path = await uploadToBucket(QUOTE_BUCKET, blob, fname); }catch(e){ console.error(e); }
+    if(path){ try{ const { data } = await sb.storage.from(QUOTE_BUCKET).createSignedUrl(path, 60*60*24*90); pdfUrl = data?.signedUrl||null; }catch(e){} }
+    const token = newReportToken();
     // log it on the lead (and move to Quoted if checked)
     const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
     const summary = 'Quote '+quoteMoney(q.total)+' — '+items.map(i=>i.desc.split('\n')[0]).join(', ');
-    const entry = { text:summary, kind:'quote', quote:{ path, number:q.number, total:q.total, items }, by:currentUser.id, byName:currentUser.name, at };
+    const entry = { text:summary, kind:'quote', quote:{ token, path, pdfUrl, number:q.number, total:q.total, items, note:q.note, cust:q.cust,
+      rep:q.rep, repEmail:q.repEmail, repPhone:q.repPhone, at }, by:currentUser.id, byName:currentUser.name, at };
     const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
     if(!error) lead.noteLog = [...current, entry];
     if(qd.toQuoted && !['won','lost','quoted'].includes(lead.stage)) await changeStage(lead, 'quoted');
-    const link = path ? await (async()=>{ const { data } = await sb.storage.from(QUOTE_BUCKET).createSignedUrl(path, 60*60*24*30); return data?.signedUrl||null; })() : null;
+    const link = error ? pdfUrl : quotePageUrl(token);
     qd.busy = false; qd.done = { blob, fname, link, q, savedCopy: !!path };
     if(!path) showToast("Quote made, but a copy couldn't be saved");
     renderQuote();
@@ -3367,7 +3386,7 @@ function quoteDoneView(){
   box.append(el('button',{class:'btn', onclick:()=>triggerDownload(d.blob, d.fname)}, 'Download PDF'));
   if(d.link){
     const first = (c.name||'').trim().split(/\s+/)[0];
-    const body = (first?'Hi '+first+', h':'H')+"ere's your quote from Nation's Pure: "+d.link;
+    const body = (first?'Hi '+first+', h':'H')+"ere's your quote from Nation's Pure. You can review and approve it here: "+d.link;
     if(c.phone){
       const num = c.phone.replace(/[^\d+]/g,'');
       box.append(el('a',{class:'btn', href:'sms:'+num+(/iPhone|iPad|Mac/.test(navigator.userAgent)?'&':'?')+'body='+encodeURIComponent(body)}, 'Text quote to customer'));
@@ -3376,7 +3395,8 @@ function quoteDoneView(){
       box.append(el('a',{class:'btn', href:'mailto:'+encodeURIComponent(c.email)+'?subject='+encodeURIComponent("Your quote from Nation's Pure")+'&body='+encodeURIComponent(body)}, 'Email quote to customer'));
     }
   }
-  box.append(el('div',{style:'font-size:12px;color:var(--text-muted)'}, d.savedCopy ? 'Saved to this lead\'s notes.' : ''));
+  if(d.link) box.append(el('a',{class:'btn', href:d.link, target:'_blank', rel:'noopener'}, 'Preview customer page'));
+  box.append(el('div',{style:'font-size:12px;color:var(--text-muted)'}, d.savedCopy ? 'Saved to this lead\'s notes. When the customer taps Approve, the lead moves to Won with this system and price.' : ''));
   box.append(el('button',{class:'btn', onclick:closeQuote}, 'Back to lead'));
   return box;
 }
