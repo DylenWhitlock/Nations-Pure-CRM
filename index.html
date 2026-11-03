@@ -797,6 +797,26 @@ body{
   .stats-row{grid-template-columns:1fr 1fr; gap:10px;}
   .stat{padding:12px 14px;} .stat-v{font-size:22px;}
 }
+/* note photos */
+.photo-strip{display:flex; flex-wrap:wrap; gap:6px; margin-top:6px;}
+.photo-thumb{width:64px; height:64px; border-radius:8px; overflow:hidden; background:var(--surface-2); border:1px solid var(--border); display:block; position:relative; flex:none;}
+.photo-thumb img{width:100%; height:100%; object-fit:cover; display:block;}
+.photo-thumb .rm{position:absolute; top:2px; right:2px; width:20px; height:20px; border-radius:50%; border:none; background:rgba(0,0,0,.65); color:#fff; font-size:13px; line-height:20px; padding:0; cursor:pointer;}
+.photos-all{display:flex; flex-direction:column; gap:4px; margin-bottom:8px;}
+.photos-all .lbl{font-size:12px; font-weight:700; color:var(--text-muted);}
+.note-tools{display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-top:6px;}
+.photo-pick{display:inline-flex; align-items:center; gap:6px; cursor:pointer;}
+.photo-pick input{display:none;}
+/* quotes */
+.q-items{display:flex; flex-direction:column; gap:8px;}
+.q-row{display:grid; grid-template-columns:minmax(0,1fr) 120px 36px; gap:8px; align-items:start;}
+.q-row textarea{min-height:44px; resize:vertical;}
+.q-row .rm{height:40px; border:1px solid var(--border); background:var(--surface); border-radius:8px; color:var(--text-muted); cursor:pointer; font-size:18px;}
+.q-total{display:flex; justify-content:space-between; align-items:center; font-size:17px; font-weight:800; padding:10px 2px; border-top:1px solid var(--border);}
+.q-cust{display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px;}
+.q-done{display:flex; flex-direction:column; gap:10px;}
+.q-done .btn{justify-content:center;}
+@media (max-width:560px){ .q-cust{grid-template-columns:minmax(0,1fr);} .q-row{grid-template-columns:minmax(0,1fr) 96px 36px;} }
 </style>
 </head>
 <body>
@@ -1747,14 +1767,13 @@ function clearLeadDraft(){ lsSet(LEAD_DRAFT_KEY, null); leadJustAdded = true; }
 // ---- note drafts per lead; a typed note is added automatically when the lead is closed ----
 function noteDraftKey(id){ return 'np_note_'+id; }
 async function autoAddNote(leadId, txt){
-  const lead = leads.find(l=>l.id===leadId); if(!lead || !txt) return;
-  const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
-  const entry = {text:txt, by:currentUser.id, byName:currentUser.name, at:Date.now()};
-  const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
-  if(error){ showToast("Note not saved — it's still there next time you open the lead"); return; }
-  lead.noteLog = [...current, entry];
+  const lead = leads.find(l=>l.id===leadId); if(!lead) return;
+  const files = takePendingPhotos(leadId);
+  if(!txt && !files.length) return;
+  const ok = await saveNoteEntry(lead, txt||'', files);
+  if(!ok){ showToast("Note not saved — it's still there next time you open the lead"); return; }
   lsSet(noteDraftKey(leadId), null);
-  showToast('Note saved');
+  showToast(files.length ? 'Note and photos saved' : 'Note saved');
 }
 
 function openAdd(){ state.adding = true; state.editingId = null; openModal(); }
@@ -1764,7 +1783,7 @@ function closeModal(){
   const noteTxt = ($('#f-newnote')?.value||'').trim();
   if(formLeadId) flushAutosave();
   else saveLeadDraft();
-  if(noteLeadId && noteTxt) autoAddNote(noteLeadId, noteTxt);
+  if(noteLeadId && (noteTxt || (pendingPhotos.leadId===noteLeadId && pendingPhotos.files.length))) autoAddNote(noteLeadId, noteTxt);
   formLeadId = null;
   $('#overlay').hidden = true; $('#modal').innerHTML = '';
   state.adding=false; state.editingId=null; state.confirmingDeleteId=null; state.apptId=null;
@@ -1878,7 +1897,9 @@ function openModal(){
         w.url ? el('a',{href:w.url, target:'_blank', rel:'noopener'}, 'Open PDF') : el('span',{}, '—')
       ));
     }
-    docsBox.append(el('button',{class:'btn', style:'align-self:flex-start;', onclick:()=>openWorkOrder(lead)}, '+ Fill work order'));
+    docsBox.append(el('div',{style:'display:flex;gap:8px;flex-wrap:wrap'},
+      el('button',{class:'btn', onclick:()=>openWorkOrder(lead)}, '+ Fill work order'),
+      el('button',{class:'btn', onclick:()=>openQuote(lead)}, '+ Create quote')));
     form.append(docsBox);
   } else {
     form.append(el('div',{class:'field'}, el('label',{}, 'Notes'), el('textarea',{id:'f-newnote', placeholder:'Anything worth noting about this lead...'})));
@@ -2095,33 +2116,132 @@ async function notifyNewLead(data){
     });
   }catch(e){ console.error('lead text alert failed', e); }
 }
+/* ================= NOTE PHOTOS =================
+   Photos ride along with a note (e.g. install notes + pictures). Stored in the private work-orders bucket;
+   each note entry keeps photos:[{path,name}]. Nothing new to set up in Supabase. */
+const PHOTO_BUCKET = 'work-orders';
+let pendingPhotos = { leadId:null, files:[] };   // picked but not yet added
+const photoUrlCache = {};
+function photoUrl(path){
+  if(!photoUrlCache[path]) photoUrlCache[path] = signedUrl(PHOTO_BUCKET, path);
+  return photoUrlCache[path];
+}
+function photoThumb(ph){
+  const img = el('img',{alt:ph.name||'Photo', loading:'lazy'});
+  const a = el('a',{class:'photo-thumb', href:'#', target:'_blank', rel:'noopener'}, img);
+  a.addEventListener('click', ev=>{ if(a.getAttribute('href')==='#'){ ev.preventDefault(); showToast('Still loading — try again'); } });
+  photoUrl(ph.path).then(u=>{ if(u){ img.src = u; a.href = u; } });
+  return a;
+}
+function leadPhotos(lead){
+  const out = [];
+  (Array.isArray(lead.noteLog) ? lead.noteLog : []).forEach(n=>{ (n && Array.isArray(n.photos) ? n.photos : []).forEach(ph=>out.push(ph)); });
+  return out;
+}
+async function shrinkImage(file){
+  try{
+    const bmp = await createImageBitmap(file);
+    const max = 1800, sc = Math.min(1, max/Math.max(bmp.width, bmp.height));
+    const c = document.createElement('canvas');
+    c.width = Math.round(bmp.width*sc); c.height = Math.round(bmp.height*sc);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    const blob = await new Promise(r=>c.toBlob(r, 'image/jpeg', 0.82));
+    return blob || file;
+  }catch(e){ return file; }
+}
+async function uploadPhotos(files){
+  const out = [];
+  for(const f of files){
+    try{
+      const blob = await shrinkImage(f);
+      const nm = (f.name||'photo').replace(/\.[^.]+$/,'')+'.jpg';
+      const path = await uploadToBucket(PHOTO_BUCKET, blob, 'photo-'+nm);
+      out.push({ path, name:f.name||'Photo' });
+    }catch(e){ console.error(e); }
+  }
+  if(out.length < files.length) showToast(out.length ? 'Some photos didn\'t upload' : 'Photos didn\'t upload');
+  return out;
+}
+function takePendingPhotos(leadId){
+  if(pendingPhotos.leadId!==leadId || !pendingPhotos.files.length) return [];
+  const f = pendingPhotos.files; pendingPhotos = { leadId:null, files:[] }; return f;
+}
+async function saveNoteEntry(lead, txt, files){
+  const photos = files.length ? await uploadPhotos(files) : [];
+  if(!txt && !photos.length) return false;
+  const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
+  const entry = {text:txt, by:currentUser.id, byName:currentUser.name, at:Date.now()};
+  if(photos.length) entry.photos = photos;
+  const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
+  if(error) return null;
+  lead.noteLog = [...current, entry];
+  return true;
+}
 async function addNote(lead){
   const ta = $('#f-newnote');
   const txt = ta.value.trim();
-  if(!txt) return;
-  const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
-  const entry = {text:txt, by:currentUser.id, byName:currentUser.name, at:Date.now()};
-  const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
-  if(error){ showToast("Couldn't add that note"); return; }
-  showToast('Note added');
-  lead.noteLog = [...current, entry];
+  const files = pendingPhotos.leadId===lead.id ? pendingPhotos.files.slice() : [];
+  if(!txt && !files.length) return;
+  const btn = $('#noteAddBtn'); if(btn){ btn.disabled = true; btn.textContent = files.length ? 'Uploading...' : 'Adding...'; }
+  const ok = await saveNoteEntry(lead, txt, files);
+  if(btn){ btn.disabled = false; btn.textContent = 'Add'; }
+  if(!ok){ showToast("Couldn't add that note"); return; }
+  takePendingPhotos(lead.id);
+  showToast(files.length ? 'Note and photos added' : 'Note added');
   lsSet(noteDraftKey(lead.id), null); ta.value = '';
   if(state.apptId) openApptSheet(lead.id); else openModal();
 }
 function buildNotesSection(lead){
-  const box = el('div',{class:'field'}, el('label',{}, 'Notes'));
+  const box = el('div',{class:'field'}, el('label',{}, 'Notes & photos'));
+  const all = leadPhotos(lead);
+  if(all.length){
+    const strip = el('div',{class:'photo-strip'});
+    all.slice().reverse().forEach(ph=>strip.append(photoThumb(ph)));
+    box.append(el('div',{class:'photos-all'}, el('div',{class:'lbl'}, 'Photos ('+all.length+')'), strip));
+  }
   const log = el('div',{class:'note-log'});
   const entries = Array.isArray(lead.noteLog) ? lead.noteLog.slice().reverse() : [];
   if(lead.notes){ log.append(el('div',{class:'note-item'}, el('div',{class:'meta'}, 'Earlier note'), lead.notes)); }
   for(const n of entries){
-    log.append(el('div',{class:'note-item'}, el('div',{class:'meta'}, (n.byName || 'Someone')+' · '+timeAgo(n.at)), n.text));
+    const item = el('div',{class:'note-item'}, el('div',{class:'meta'}, (n.byName || 'Someone')+' · '+timeAgo(n.at)), n.text||'');
+    if(Array.isArray(n.photos) && n.photos.length){
+      const strip = el('div',{class:'photo-strip'}); n.photos.forEach(ph=>strip.append(photoThumb(ph))); item.append(strip);
+    }
+    if(n.quote && n.quote.path){
+      const a = el('a',{href:'#', target:'_blank', rel:'noopener', style:'display:inline-block;margin-top:4px;font-weight:700;color:var(--accent-strong)'}, 'Open quote PDF');
+      a.addEventListener('click', ev=>{ if(a.getAttribute('href')==='#'){ ev.preventDefault(); showToast('Still loading — try again'); } });
+      signedUrl(QUOTE_BUCKET, n.quote.path).then(u=>{ if(u) a.href = u; });
+      item.append(el('div',{}, a));
+    }
+    log.append(item);
   }
   if(entries.length===0 && !lead.notes){ log.append(el('div',{class:'empty-note'}, 'No notes yet')); }
   box.append(log);
   const ta = el('textarea',{id:'f-newnote', placeholder:'Add a note... (saves automatically when you close)'});
   ta.value = lsGet(noteDraftKey(lead.id)) || '';
   ta.addEventListener('input', ()=>lsSet(noteDraftKey(lead.id), ta.value.trim() ? ta.value : null));
-  box.append(el('div',{class:'add-note-row'}, ta, el('button',{class:'btn', onclick:()=>addNote(lead)}, 'Add')));
+  box.append(el('div',{class:'add-note-row'}, ta, el('button',{class:'btn', id:'noteAddBtn', onclick:()=>addNote(lead)}, 'Add')));
+
+  // photo picker
+  if(pendingPhotos.leadId!==lead.id) pendingPhotos = { leadId:lead.id, files:[] };
+  const pend = el('div',{class:'photo-strip'});
+  const paintPending = ()=>{
+    pend.innerHTML = '';
+    pendingPhotos.files.forEach((f,i)=>{
+      const url = URL.createObjectURL(f);
+      pend.append(el('div',{class:'photo-thumb'}, el('img',{src:url, alt:f.name||'Photo'}),
+        el('button',{class:'rm', 'aria-label':'Remove photo', onclick:()=>{ pendingPhotos.files.splice(i,1); paintPending(); }}, '×')));
+    });
+    hint.textContent = pendingPhotos.files.length ? pendingPhotos.files.length+' photo'+(pendingPhotos.files.length>1?'s':'')+' — tap Add to attach with this note' : '';
+  };
+  const fileI = el('input',{type:'file', accept:'image/*', multiple:'multiple'});
+  fileI.addEventListener('change', ()=>{ pendingPhotos.files.push(...[...fileI.files]); fileI.value=''; paintPending(); });
+  const pick = el('label',{class:'btn photo-pick',
+    html:'<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"/><circle cx="12" cy="13" r="4"/></svg><span>Add photos</span>'});
+  pick.append(fileI);
+  const hint = el('span',{style:'font-size:12px;color:var(--text-muted)'});
+  box.append(el('div',{class:'note-tools'}, pick, hint), pend);
+  paintPending();
   return box;
 }
 async function doDelete(id){
@@ -2756,6 +2876,7 @@ function buildWaterCard(lead){
 function openWaterTest(lead){
   if(formLeadId) flushAutosave();
   state.apptReturn = !!state.apptId;
+  state.apptId = null; state.editingId = null;   // keep live updates from redrawing the lead over the test
   formLeadId = null;
   const overlay = $('#overlay'), modal = $('#modal');
   modal.innerHTML = '';
@@ -3046,6 +3167,219 @@ $('#sigDoneBtn').addEventListener('click', ()=>{
   showToast(wasRedraw ? 'Signature replaced on all 3 pages' : 'Signature applied to all 3 customer lines');
   renderWo();
 });
+
+/* ================= QUOTES =================
+   Letterhead quote for a lead: customer info fills in from the lead, the rep adds systems + prices.
+   Makes a PDF, keeps a copy in storage, logs it in the lead's notes, and can text/email the customer a link. */
+const QUOTE_BUCKET = 'work-orders';
+const NP_CO = { name:"Nation's Pure Water Systems", addr1:'108 Nu Energy Dr, Suite 2', addr2:'Aledo, TX 76008', phone:'888-763-0050', web:'nationspure.com' };
+let qd = null;
+function quoteMoney(n){ return '$'+(Number(n)||0).toLocaleString('en-US',{minimumFractionDigits:2, maximumFractionDigits:2}); }
+function parseMoney(v){ const n = parseFloat(String(v||'').replace(/[^0-9.\-]/g,'')); return isNaN(n) ? 0 : n; }
+function openQuote(lead){
+  if(formLeadId) flushAutosave();
+  const noteTxt = ($('#f-newnote')?.value||'').trim();
+  if(noteTxt || (pendingPhotos.leadId===lead.id && pendingPhotos.files.length)) autoAddNote(lead.id, noteTxt);
+  formLeadId = null;
+  state.apptReturn = !!state.apptId;
+  state.apptId = null; state.editingId = null;   // keep live updates from redrawing the lead over the quote
+  const recs = (lead.waterTest && Array.isArray(lead.waterTest.recs)) ? lead.waterTest.recs : [];
+  const items = recs.map(id=>({ desc:(WT_SYSTEMS.find(x=>x.id===id)||{}).label||'', price:'' })).filter(i=>i.desc);
+  qd = { lead, cust:{ name:lead.name||'', phone:lead.phone||'', email:lead.email||'', address:lead.address||'' },
+    items: items.length ? items : [{desc:'', price:''}], note:'', toQuoted: !['won','lost','quoted'].includes(lead.stage), busy:false, done:null };
+  renderQuote();
+}
+function closeQuote(){ const id = qd?.lead?.id; qd = null; reopenLead(id); }
+function renderQuote(){
+  const overlay = $('#overlay'), modal = $('#modal');
+  modal.innerHTML = '';
+  const form = el('div',{class:'modal'});
+  form.append(el('div',{class:'modal-head'},
+    el('div',{}, el('h2',{}, qd.done ? 'Quote ready' : 'New quote'), el('div',{class:'sheet-sub'}, qd.cust.name||'Customer')),
+    el('button',{class:'icon-btn', 'aria-label':'Close', onclick:closeQuote, html:'<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><path d="M18 6L6 18M6 6l12 12"/></svg>'})));
+  if(qd.done){ form.append(quoteDoneView()); modal.append(form); overlay.hidden = false; return; }
+
+  const cust = el('div',{class:'q-cust'});
+  [['name','Customer name','text'],['phone','Phone','tel'],['email','Email','email'],['address','Address','text']].forEach(([k,lbl,t])=>{
+    const i = el('input',{type:t}); i.value = qd.cust[k]; i.addEventListener('input', ()=>{ qd.cust[k] = i.value; });
+    cust.append(el('div',{class:'field'}, el('label',{}, lbl), i));
+  });
+  form.append(el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'Prepared for'), cust));
+
+  const totalV = el('span',{});
+  const paintTotal = ()=>{ totalV.textContent = quoteMoney(qd.items.reduce((a,i)=>a+parseMoney(i.price),0)); };
+  const list = el('div',{class:'q-items'});
+  const paintItems = ()=>{
+    list.innerHTML = '';
+    list.append(el('div',{class:'q-row', style:'font-size:12px;font-weight:700;color:var(--text-muted)'}, el('span',{}, 'System / service'), el('span',{}, 'Price'), el('span',{})));
+    qd.items.forEach((it,i)=>{
+      const d = el('textarea',{placeholder:'e.g. Whole-home water softener, installed'}); d.value = it.desc;
+      d.addEventListener('input', ()=>{ it.desc = d.value; });
+      const pr = el('input',{type:'text', inputmode:'decimal', placeholder:'$0'}); pr.value = it.price;
+      pr.addEventListener('input', ()=>{ it.price = pr.value; paintTotal(); });
+      const rm = el('button',{class:'rm', 'aria-label':'Remove line', onclick:()=>{ qd.items.splice(i,1); if(!qd.items.length) qd.items.push({desc:'',price:''}); paintItems(); paintTotal(); }}, '×');
+      list.append(el('div',{class:'q-row'}, d, pr, rm));
+    });
+  };
+  paintItems(); paintTotal();
+  form.append(el('div',{class:'field'}, el('div',{class:'sec-lbl'}, 'System offering'), list,
+    el('button',{class:'btn', style:'align-self:flex-start', onclick:()=>{ qd.items.push({desc:'',price:''}); paintItems(); }}, '+ Add line'),
+    el('div',{class:'q-total'}, el('span',{}, 'Total'), totalV)));
+
+  const note = el('textarea',{placeholder:'Optional — anything you want on the quote (what\'s included, timing, etc.)'});
+  note.value = qd.note; note.addEventListener('input', ()=>{ qd.note = note.value; });
+  form.append(el('div',{class:'field'}, el('label',{}, 'Note on quote'), note));
+
+  if(!['won','lost','quoted'].includes(qd.lead.stage)){
+    const cb = el('input',{type:'checkbox'}); cb.checked = qd.toQuoted; cb.addEventListener('change', ()=>{ qd.toQuoted = cb.checked; });
+    form.append(el('label',{style:'display:flex;align-items:center;gap:8px;font-size:13.5px'}, cb, 'Move this lead to Quoted'));
+  }
+  form.append(el('button',{class:'btn btn-primary', style:'justify-content:center;min-height:46px', onclick:finishQuote}, qd.busy ? 'Making quote...' : 'Create quote'));
+  if(qd.busy) form.lastChild.setAttribute('disabled','disabled'); else form.lastChild.removeAttribute('disabled');
+  modal.append(form);
+  overlay.hidden = false;
+  overlay.onclick = (e)=>{ if(e.target===overlay) closeQuote(); };
+}
+function pdfSafe(t){ return String(t||'').replace(/[‘’]/g,"'").replace(/[“”]/g,'"').replace(/[^\x20-\x7E -ÿ–—•]/g,''); }
+function wrapText(txt, font, size, maxW){
+  const out = [];
+  pdfSafe(txt).split(/\r?\n/).forEach(par=>{
+    let line = '';
+    par.split(/\s+/).forEach(w=>{
+      const t = line ? line+' '+w : w;
+      if(font.widthOfTextAtSize(t, size) > maxW && line){ out.push(line); line = w; } else line = t;
+    });
+    out.push(line);
+  });
+  return out;
+}
+async function generateQuotePdf(q){
+  const { PDFDocument, StandardFonts, rgb } = PDFLib;
+  const doc = await PDFDocument.create();
+  const page = doc.addPage([612, 792]);
+  const reg = await doc.embedFont(StandardFonts.Helvetica), bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const ink = rgb(0.11,0.11,0.11), grey = rgb(0.42,0.45,0.5), line = rgb(0.85,0.87,0.9), navy = rgb(0.12,0.23,0.37);
+  const M = 54, W = 612, R = W-M;
+  const txt = (t,x,y,o={})=>page.drawText(pdfSafe(t), { x, y, size:o.size||10, font:o.font||reg, color:o.color||ink });
+  const rtxt = (t,xr,y,o={})=>{ const f=o.font||reg, sz=o.size||10; txt(t, xr - f.widthOfTextAtSize(pdfSafe(t), sz), y, o); };
+  let y = 792 - M;
+  try{
+    const lb = new Uint8Array(await (await fetch('assets/nations-pure-logo.png')).arrayBuffer());
+    const logo = await doc.embedPng(lb); const lh = 62, lw = lh*logo.width/logo.height;
+    page.drawImage(logo, { x:M, y:y-lh, width:lw, height:lh });
+  }catch(e){ txt(NP_CO.name, M, y-20, {font:bold, size:16}); }
+  rtxt(NP_CO.name, R, y-10, {font:bold, size:10.5});
+  rtxt(NP_CO.addr1, R, y-24, {color:grey, size:9.5});
+  rtxt(NP_CO.addr2, R, y-37, {color:grey, size:9.5});
+  rtxt(NP_CO.phone+'  |  '+NP_CO.web, R, y-50, {color:grey, size:9.5});
+  y -= 84;
+  page.drawLine({ start:{x:M,y}, end:{x:R,y}, thickness:1, color:line });
+  y -= 34;
+  txt('Quote', M, y, {font:bold, size:24});
+  rtxt('Date: '+new Date(q.at).toLocaleDateString('en-US',{month:'long', day:'numeric', year:'numeric'}), R, y+8, {size:10});
+  rtxt('Quote #: '+q.number, R, y-6, {size:10, color:grey});
+  y -= 34;
+  txt('PREPARED FOR', M, y, {font:bold, size:8, color:grey});
+  txt('PREPARED BY', 340, y, {font:bold, size:8, color:grey});
+  y -= 15;
+  const fmtPh = p=>{ const d = String(p||'').replace(/\D/g,'').replace(/^1(?=\d{10}$)/,''); return d.length===10 ? '('+d.slice(0,3)+') '+d.slice(3,6)+'-'+d.slice(6) : p; };
+  const custLines = [q.cust.name, q.cust.address, fmtPh(q.cust.phone), q.cust.email].filter(Boolean);
+  const repLines = [q.rep, q.repEmail].filter(Boolean);
+  const top = y;
+  custLines.forEach((t,i)=>{ wrapText(t, i?reg:bold, 10.5, 260).forEach(l=>{ txt(l, M, y, {font:i?reg:bold, size:10.5}); y -= 14; }); });
+  let y2 = top; repLines.forEach((t,i)=>{ txt(t, 340, y2, {font:i?reg:bold, size:10.5}); y2 -= 14; });
+  y = Math.min(y, y2) - 18;
+  // table
+  page.drawRectangle({ x:M, y:y-6, width:R-M, height:22, color:navy });
+  txt('SYSTEM / SERVICE', M+10, y+2, {font:bold, size:8.5, color:rgb(1,1,1)});
+  rtxt('PRICE', R-10, y+2, {font:bold, size:8.5, color:rgb(1,1,1)});
+  y -= 26;
+  for(const it of q.items){
+    const lines = wrapText(it.desc, reg, 10.5, R-M-150);
+    lines.forEach((l,i)=>{ txt(l, M+10, y-i*14, {size:10.5}); });
+    rtxt(quoteMoney(it.price), R-10, y, {size:10.5});
+    y -= lines.length*14 + 8;
+    page.drawLine({ start:{x:M,y:y+4}, end:{x:R,y:y+4}, thickness:0.6, color:line });
+    y -= 6;
+  }
+  y -= 4;
+  page.drawRectangle({ x:R-220, y:y-10, width:220, height:28, color:rgb(0.95,0.96,0.97) });
+  txt('Total', R-210, y, {font:bold, size:12});
+  rtxt(quoteMoney(q.total), R-10, y, {font:bold, size:12});
+  y -= 40;
+  if(q.note){
+    wrapText(q.note, reg, 10.5, R-M).forEach(l=>{ txt(l, M, y, {size:10.5}); y -= 14; });
+    y -= 10;
+  }
+  // acceptance
+  const sy = Math.min(y-30, 150);
+  page.drawLine({ start:{x:M,y:sy}, end:{x:M+250,y:sy}, thickness:0.8, color:ink });
+  page.drawLine({ start:{x:M+300,y:sy}, end:{x:M+430,y:sy}, thickness:0.8, color:ink });
+  txt('Customer signature', M, sy-13, {size:8.5, color:grey});
+  txt('Date', M+300, sy-13, {size:8.5, color:grey});
+  page.drawLine({ start:{x:M,y:M+14}, end:{x:R,y:M+14}, thickness:0.6, color:line });
+  txt(NP_CO.name, M, M, {size:8.5, color:grey});
+  rtxt(NP_CO.phone+'  |  '+NP_CO.web, R, M, {size:8.5, color:grey});
+  return await doc.save();
+}
+async function finishQuote(){
+  if(qd.busy) return;
+  const items = qd.items.map(i=>({ desc:(i.desc||'').trim(), price:parseMoney(i.price) })).filter(i=>i.desc || i.price);
+  if(!items.length){ showToast('Add at least one system and price'); return; }
+  if(items.some(i=>!i.desc)){ showToast('Each line needs a description'); return; }
+  if(!qd.cust.name.trim()){ showToast('Add the customer name'); return; }
+  qd.busy = true; renderQuote();
+  const lead = qd.lead;
+  try{
+    const at = Date.now();
+    const q = { at, number: new Date(at).toISOString().slice(2,10).replace(/-/g,'')+'-'+String(at).slice(-4),
+      cust:{ ...qd.cust }, items, total: items.reduce((a,i)=>a+i.price,0), note: qd.note.trim(),
+      rep: currentUser.name, repEmail: currentUser.email };
+    const bytes = await generateQuotePdf(q);
+    const blob = new Blob([bytes], {type:'application/pdf'});
+    const fname = ((q.cust.name||'customer').trim().replace(/[^a-z0-9]+/gi,'-').replace(/^-+|-+$/g,'')||'customer')+'-quote-'+q.number+'.pdf';
+    let path = null;
+    try{ path = await uploadToBucket(QUOTE_BUCKET, blob, fname); }catch(e){ console.error(e); }
+    // log it on the lead (and move to Quoted if checked)
+    const current = Array.isArray(lead.noteLog) ? lead.noteLog : [];
+    const summary = 'Quote '+quoteMoney(q.total)+' — '+items.map(i=>i.desc.split('\n')[0]).join(', ');
+    const entry = { text:summary, kind:'quote', quote:{ path, number:q.number, total:q.total, items }, by:currentUser.id, byName:currentUser.name, at };
+    const { error } = await sb.from('leads').update({ note_log:[...current, entry], updated_at: Date.now() }).eq('id', lead.id);
+    if(!error) lead.noteLog = [...current, entry];
+    if(qd.toQuoted && !['won','lost','quoted'].includes(lead.stage)) await changeStage(lead, 'quoted');
+    const link = path ? await (async()=>{ const { data } = await sb.storage.from(QUOTE_BUCKET).createSignedUrl(path, 60*60*24*30); return data?.signedUrl||null; })() : null;
+    qd.busy = false; qd.done = { blob, fname, link, q, savedCopy: !!path };
+    if(!path) showToast("Quote made, but a copy couldn't be saved");
+    renderQuote();
+  }catch(err){
+    console.error(err); showToast("Couldn't make the quote"); qd.busy = false; renderQuote();
+  }
+}
+function quoteDoneView(){
+  const d = qd.done, c = d.q.cust;
+  const box = el('div',{class:'q-done'});
+  box.append(el('div',{style:'font-size:14px'}, 'Quote '+d.q.number+' · '+quoteMoney(d.q.total)));
+  const openBtn = el('button',{class:'btn btn-primary', onclick:()=>{
+    const u = URL.createObjectURL(d.blob); const w = window.open(u, '_blank');
+    if(!w) triggerDownload(d.blob, d.fname);
+  }}, 'Open / print quote');
+  box.append(openBtn);
+  box.append(el('button',{class:'btn', onclick:()=>triggerDownload(d.blob, d.fname)}, 'Download PDF'));
+  if(d.link){
+    const first = (c.name||'').trim().split(/\s+/)[0];
+    const body = (first?'Hi '+first+', h':'H')+"ere's your quote from Nation's Pure: "+d.link;
+    if(c.phone){
+      const num = c.phone.replace(/[^\d+]/g,'');
+      box.append(el('a',{class:'btn', href:'sms:'+num+(/iPhone|iPad|Mac/.test(navigator.userAgent)?'&':'?')+'body='+encodeURIComponent(body)}, 'Text quote to customer'));
+    }
+    if(c.email){
+      box.append(el('a',{class:'btn', href:'mailto:'+encodeURIComponent(c.email)+'?subject='+encodeURIComponent("Your quote from Nation's Pure")+'&body='+encodeURIComponent(body)}, 'Email quote to customer'));
+    }
+  }
+  box.append(el('div',{style:'font-size:12px;color:var(--text-muted)'}, d.savedCopy ? 'Saved to this lead\'s notes.' : ''));
+  box.append(el('button',{class:'btn', onclick:closeQuote}, 'Back to lead'));
+  return box;
+}
 
 /* ---------- PDF generation ---------- */
 function dataUrlToBytes(durl){
@@ -3597,7 +3931,7 @@ function renderMyAppts(){
 }
 function telHref(p){ return 'tel:'+(p||'').replace(/[^\d+]/g,''); }
 function smsHref(p){ return 'sms:'+(p||'').replace(/[^\d+]/g,''); }
-function mapsHref(a){ return 'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(a||''); }
+function mapsHref(a){ return 'https://maps.apple.com/?daddr='+encodeURIComponent(a||'')+'&dirflg=d'; }
 const QA_ICONS = {
   call:'<path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1.9.4 1.8.7 2.7a2 2 0 0 1-.5 2.1L8 9.8a16 16 0 0 0 6 6l1.3-1.3a2 2 0 0 1 2.1-.4c.9.3 1.8.6 2.7.7a2 2 0 0 1 1.7 2z"/>',
   text:'<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
@@ -3677,7 +4011,9 @@ function openApptSheet(id){
     docsBox.append(el('div',{class:'doc-row'}, el('span',{}, timeAgo(w.createdAt)),
       w.url ? el('a',{href:w.url, target:'_blank', rel:'noopener'}, 'Open PDF') : el('span',{}, '—')));
   }
-  docsBox.append(el('button',{class:'btn', style:'align-self:flex-start;', onclick:()=>openWorkOrder(lead)}, '+ Fill work order'));
+  docsBox.append(el('div',{style:'display:flex;gap:8px;flex-wrap:wrap'},
+    el('button',{class:'btn', onclick:()=>openWorkOrder(lead)}, '+ Fill work order'),
+    el('button',{class:'btn', onclick:()=>openQuote(lead)}, '+ Create quote')));
   form.append(docsBox);
 
   modal.append(form);
