@@ -1280,7 +1280,9 @@ async function fetchLeads(){
     if(data.length<1000) break;
   }
   leads = all.map(mapLead);
+  leadsLoaded = true;
   render();
+  sweepGhostBookings();
   sweepExpiredQuotes();
   if(state.editingId && !state.apptId && !modalBusy()) openModal();
   cleanupStaleAppts();
@@ -2246,6 +2248,7 @@ function buildNotesSection(lead){
   return box;
 }
 async function doDelete(id){
+  await sb.from('blocks').delete().eq('lead_id', id).eq('status','booked');
   const { error } = await sb.from('leads').delete().eq('id', id);
   if(error){ showToast("Couldn't delete that lead"); return; }
   closeModal();
@@ -2339,7 +2342,35 @@ for(let m=8*60; m<=18*60; m+=30) SLOTS.push(String(Math.floor(m/60)).padStart(2,
 // Before half-hour slots existed, a blocked/opened :00 time covered the whole hour.
 // Those older records also cover the :30 that follows them.
 const HALF_HOUR_SLOTS_SINCE = Date.UTC(2026,9,19,18,45);
+/* ---- ghost bookings: a "booked" time whose lead was deleted or moved to another time/rep.
+   They don't show on the calendar but used to block the slot — now they're ignored and cleaned up. ---- */
+let leadsLoaded = false;
+const ghostDeleting = new Set();
+function isGhostBooking(b){
+  if(!leadsLoaded || !b || b.status!=='booked' || !b.lead_id) return false;
+  if(Date.now() - Number(b.created_at||0) < 10*60*1000) return false;   // just booked — let the lead catch up
+  const l = leads.find(x=>x.id===b.lead_id);
+  if(!l) return true;
+  return l.apptDate!==b.date || l.apptStart!==b.slot || (l.assignedRep||'').trim().toLowerCase()!==(b.rep||'').trim().toLowerCase();
+}
+function stripGhosts(rows){
+  const keep = [];
+  (rows||[]).forEach(b=>{
+    if(isGhostBooking(b)){
+      if(b.id && !ghostDeleting.has(b.id)){ ghostDeleting.add(b.id); sb.from('blocks').delete().eq('id', b.id).eq('status','booked').then(({error})=>{ if(error) console.error(error); }); }
+    } else keep.push(b);
+  });
+  return keep;
+}
+async function sweepGhostBookings(){
+  if(!currentUser || isRepUser()) return;
+  const { data, error } = await sb.from('blocks').select('*').eq('status','booked').gte('date', todayStr());
+  if(error){ console.error(error); return; }
+  const before = (data||[]).length, left = stripGhosts(data).length;
+  if(before>left) console.info('Cleared '+(before-left)+' ghost booking(s)');
+}
 function expandLegacyBlocks(rows){
+  rows = stripGhosts(rows);
   const out = (rows||[]).slice();
   (rows||[]).forEach(b=>{
     if((b.status==='blocked'||b.status==='open') && /:00$/.test(b.slot||'') && Number(b.created_at||0) < HALF_HOUR_SLOTS_SINCE){
@@ -2758,7 +2789,7 @@ async function bookAppointment(lead, rep, date, slot, addr){
     const { data, error } = await sb.from('blocks').select('*').eq('rep', rep).eq('date', date);
     if(error) throw error;
     const map = {};
-    data.forEach(v=>{ map[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name }; });
+    stripGhosts(data).forEach(v=>{ map[v.slot] = { status:v.status, leadId:v.lead_id, customerName:v.customer_name }; });
     if(map[slot] && map[slot].status!=='open'){ showToast('That time was just taken'); if(!lead.isDraft) openModal(); return; }
     delete map[slot];
     const check = await computeTravelBlocks(rep, date, map, addr, lead.id);
@@ -2777,6 +2808,10 @@ async function bookAppointment(lead, rep, date, slot, addr){
       lead_id:lead.id, customer_name:lead.name||'', created_by:currentUser.id, created_at:Date.now(),
     });
     if(e1) throw e1;
+    // rebooking: free up the old time so it doesn't linger as a hidden booking
+    if(lead.apptDate && lead.apptStart && lead.assignedRep && blockDocId(lead.assignedRep, lead.apptDate, lead.apptStart)!==blockDocId(rep,date,slot)){
+      await sb.from('blocks').delete().eq('id', blockDocId(lead.assignedRep, lead.apptDate, lead.apptStart)).eq('status','booked');
+    }
     const upd = { assigned_rep:rep, appt_date:date, appt_start:slot, updated_at:Date.now(), ...unconfirmFields(lead) };
     if(addr !== (lead.address||'').trim()){ upd.address = addr; lead.address = addr; }
     if(lead.stage==='new' || lead.stage==='awaiting') upd.stage = 'scheduled';
