@@ -4822,7 +4822,7 @@ async function saveRepPhone(repName, phoneI){
   showToast('Saved '+repName+"'s cell"); fetchComms();
 }
 
-const TRIGGER_LABEL = { new_lead:'New lead', rep_assigned:'Rep assigned', won:'Deal won' };
+const TRIGGER_LABEL = { new_lead:'New lead', rep_assigned:'Rep assigned', won:'Deal won', appt_reminder:'Customer confirmation' };
 function renderTextLog(){
   const box = $('#textLog'); box.innerHTML = '';
   if(comm.log.length===0){ box.append(el('div',{class:'empty-note'}, 'No texts yet')); return; }
